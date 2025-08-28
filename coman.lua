@@ -5,7 +5,7 @@ local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
 local player = Players.LocalPlayer
 
--- Función para obtener el personaje y sus partes
+-- Obtener personaje y partes
 local function getCharacter()
     local char = player.Character or player.CharacterAdded:Wait()
     return char, char:WaitForChild("Humanoid"), char:WaitForChild("HumanoidRootPart")
@@ -13,7 +13,6 @@ end
 
 local character, humanoid, hrp = getCharacter()
 
--- Actualizar referencias al respawnear
 player.CharacterAdded:Connect(function(char)
     character, humanoid, hrp = getCharacter()
 end)
@@ -30,6 +29,33 @@ Frame.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
 Frame.BackgroundTransparency = 0.2
 Frame.Parent = ScreenGui
 
+-- Hacer Frame arrastrable
+local dragging = false
+local dragOffset = Vector2.new(0,0)
+
+Frame.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        dragging = true
+        dragOffset = Vector2.new(input.Position.X, input.Position.Y) - Vector2.new(Frame.AbsolutePosition.X, Frame.AbsolutePosition.Y)
+    end
+end)
+
+Frame.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        dragging = false
+    end
+end)
+
+Frame.InputChanged:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+        if dragging then
+            local newPos = Vector2.new(input.Position.X, input.Position.Y) - dragOffset
+            Frame.Position = UDim2.new(0, newPos.X, 0, newPos.Y)
+        end
+    end
+end)
+
+-- Botones
 local FlyButton = Instance.new("TextButton")
 FlyButton.Size = UDim2.new(0, 200, 0, 50)
 FlyButton.Position = UDim2.new(0, 10, 0, 10)
@@ -46,9 +72,9 @@ SpeedButton.BackgroundColor3 = Color3.fromRGB(60, 179, 113)
 SpeedButton.TextColor3 = Color3.fromRGB(255, 255, 255)
 SpeedButton.Parent = Frame
 
--- Variables de control
+-- Variables
 local flyingEnabled = false
-local flying = false
+local flyingUp = false
 local speedy = false
 local flyVel
 
@@ -58,7 +84,7 @@ local function toggleFly()
     if flyingEnabled then
         flyVel = Instance.new("BodyVelocity")
         flyVel.Name = "FlyVelocity"
-        flyVel.MaxForce = Vector3.new(1e5, 1e5, 1e5)
+        flyVel.MaxForce = Vector3.new(1e5,1e5,1e5)
         flyVel.Velocity = Vector3.new(0,0,0)
         flyVel.Parent = hrp
     else
@@ -66,7 +92,7 @@ local function toggleFly()
             flyVel:Destroy()
             flyVel = nil
         end
-        flying = false
+        flyingUp = false
     end
 end
 
@@ -85,21 +111,21 @@ SpeedButton.MouseButton1Click:Connect(toggleSpeed)
 UserInputService.InputBegan:Connect(function(input, gpe)
     if gpe then return end
     if flyingEnabled and input.KeyCode == Enum.KeyCode.Space then
-        flying = true
+        flyingUp = true
     end
 end)
 
 UserInputService.InputEnded:Connect(function(input)
     if flyingEnabled and input.KeyCode == Enum.KeyCode.Space then
-        flying = false
+        flyingUp = false
     end
 end)
 
--- Mantener vuelo
+-- Mantener vuelo y movimiento horizontal
 RunService.RenderStepped:Connect(function()
     if flyingEnabled and flyVel and hrp then
-        local moveDir = humanoid.MoveDirection * 50
-        local upVel = flying and 50 or 0 -- subir solo mientras mantienes Space
+        local moveDir = humanoid.MoveDirection * 50 -- movimiento horizontal
+        local upVel = flyingUp and 50 or 0       -- subir solo con Space
         flyVel.Velocity = moveDir + Vector3.new(0, upVel, 0)
     end
 end)
