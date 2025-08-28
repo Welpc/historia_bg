@@ -28,20 +28,20 @@ Frame.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
 Frame.BackgroundTransparency = 0.2
 Frame.Parent = ScreenGui
 
--- Bot髇 Volar
+-- Bot贸n Volar
 local FlyButton = Instance.new("TextButton")
 FlyButton.Size = UDim2.new(0, 200, 0, 50)
 FlyButton.Position = UDim2.new(0, 10, 0, 10)
-FlyButton.Text = "?? Activar/Desactivar Volar"
+FlyButton.Text = "Volar"
 FlyButton.BackgroundColor3 = Color3.fromRGB(70, 130, 180)
 FlyButton.TextColor3 = Color3.fromRGB(255, 255, 255)
 FlyButton.Parent = Frame
 
--- Bot髇 Velocidad
+-- Bot贸n Velocidad
 local SpeedButton = Instance.new("TextButton")
 SpeedButton.Size = UDim2.new(0, 200, 0, 50)
 SpeedButton.Position = UDim2.new(0, 10, 0, 80)
-SpeedButton.Text = "????? Activar/Desactivar Velocidad"
+SpeedButton.Text = "velocidad"
 SpeedButton.BackgroundColor3 = Color3.fromRGB(60, 179, 113)
 SpeedButton.TextColor3 = Color3.fromRGB(255, 255, 255)
 SpeedButton.Parent = Frame
@@ -51,7 +51,7 @@ local flying = false
 local speedy = false
 local flyVel
 
--- Funci髇 de vuelo
+-- Funci贸n de vuelo
 local function toggleFly()
     flying = not flying
     if flying then
@@ -68,7 +68,7 @@ local function toggleFly()
     end
 end
 
--- Funci髇 de velocidad
+-- Funci贸n de velocidad
 local function toggleSpeed()
     speedy = not speedy
     if speedy then
