@@ -2,9 +2,10 @@
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
 local player = Players.LocalPlayer
 
--- Esperar al personaje
+-- Función para obtener el personaje y sus partes
 local function getCharacter()
     local char = player.Character or player.CharacterAdded:Wait()
     return char, char:WaitForChild("Humanoid"), char:WaitForChild("HumanoidRootPart")
@@ -12,6 +13,7 @@ end
 
 local character, humanoid, hrp = getCharacter()
 
+-- Actualizar referencias al respawnear
 player.CharacterAdded:Connect(function(char)
     character, humanoid, hrp = getCharacter()
 end)
@@ -45,42 +47,59 @@ SpeedButton.TextColor3 = Color3.fromRGB(255, 255, 255)
 SpeedButton.Parent = Frame
 
 -- Variables de control
+local flyingEnabled = false
 local flying = false
 local speedy = false
-local flyForce
+local flyVel
 
--- Función de vuelo
+-- Activar/desactivar vuelo
 local function toggleFly()
-    flying = not flying
-    if flying then
-        flyForce = Instance.new("BodyVelocity")
-        flyForce.Name = "FlyForce"
-        flyForce.MaxForce = Vector3.new(1e5, 1e5, 1e5) -- suficiente para contrarrestar gravedad
-        flyForce.Velocity = Vector3.new(0,0,0)
-        flyForce.Parent = hrp
+    flyingEnabled = not flyingEnabled
+    if flyingEnabled then
+        flyVel = Instance.new("BodyVelocity")
+        flyVel.Name = "FlyVelocity"
+        flyVel.MaxForce = Vector3.new(1e5, 1e5, 1e5)
+        flyVel.Velocity = Vector3.new(0,0,0)
+        flyVel.Parent = hrp
     else
-        if flyForce then
-            flyForce:Destroy()
-            flyForce = nil
+        if flyVel then
+            flyVel:Destroy()
+            flyVel = nil
         end
+        flying = false
     end
 end
 
--- Función de velocidad
+-- Activar/desactivar velocidad
 local function toggleSpeed()
     speedy = not speedy
-    humanoid.WalkSpeed = speedy and 100 or 16
+    if humanoid then
+        humanoid.WalkSpeed = speedy and 100 or 16
+    end
 end
 
--- Conectar botones
 FlyButton.MouseButton1Click:Connect(toggleFly)
 SpeedButton.MouseButton1Click:Connect(toggleSpeed)
 
+-- Detectar tecla de salto
+UserInputService.InputBegan:Connect(function(input, gpe)
+    if gpe then return end
+    if flyingEnabled and input.KeyCode == Enum.KeyCode.Space then
+        flying = true
+    end
+end)
+
+UserInputService.InputEnded:Connect(function(input)
+    if flyingEnabled and input.KeyCode == Enum.KeyCode.Space then
+        flying = false
+    end
+end)
+
 -- Mantener vuelo
 RunService.RenderStepped:Connect(function()
-    if flying and flyForce then
+    if flyingEnabled and flyVel and hrp then
         local moveDir = humanoid.MoveDirection * 50
-        -- Agregar fuerza hacia arriba para contrarrestar gravedad
-        flyForce.Velocity = moveDir + Vector3.new(0, workspace.Gravity, 0)
+        local upVel = flying and 50 or 0 -- subir solo mientras mantienes Space
+        flyVel.Velocity = moveDir + Vector3.new(0, upVel, 0)
     end
 end)
