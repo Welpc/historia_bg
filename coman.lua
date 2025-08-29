@@ -30,7 +30,7 @@ local FlyButton = Instance.new("TextButton")
 FlyButton.Size = UDim2.new(0, 200, 0, 50)
 FlyButton.Position = UDim2.new(0, 10, 0, 10)
 FlyButton.Text = "Volarrr"
-FlyButton.BackgroundColor3 = Color3.fromRGB(71, 130, 180)
+FlyButton.BackgroundColor3 = Color3.fromRGB(70, 130, 180)
 FlyButton.TextColor3 = Color3.fromRGB(255, 255, 255)
 FlyButton.Parent = menu
 
