@@ -93,3 +93,22 @@ UserInputService.InputChanged:Connect(function(input)
 		)
 	end
 end)
+
+-- ========================
+-- FUNCIONES DE LOS BOTONES
+-- ========================
+
+local player = game.Players.LocalPlayer
+local character = player.Character or player.CharacterAdded:Wait()
+local humanoid = character:WaitForChild("Humanoid")
+
+-- Velocidad
+local speedy = false
+local function toggleSpeed()
+	speedy = not speedy
+	if humanoid then
+		humanoid.WalkSpeed = speedy and 100 or 16
+	end
+end
+
+SpeedButton.MouseButton1Click:Connect(toggleSpeed)
