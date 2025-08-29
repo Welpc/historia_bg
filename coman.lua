@@ -1,45 +1,46 @@
--- main.lua
+-- Creamos un ScreenGui
+local screenGui = Instance.new("ScreenGui")
+screenGui.Parent = game.Players.LocalPlayer:WaitForChild("PlayerGui")
 
--- Posición inicial del botón
-local boton = {
-    x = 200,
-    y = 200,
-    width = 100,
-    height = 50,
-    color = {1, 0, 0} -- rojo
-}
+-- Creamos el botón rojo
+local boton = Instance.new("TextButton")
+boton.Size = UDim2.new(0, 100, 0, 50)
+boton.Position = UDim2.new(0.5, -50, 0.5, -25) -- centrado
+boton.BackgroundColor3 = Color3.fromRGB(255, 0, 0)
+boton.Text = "Mover"
+boton.Parent = screenGui
 
-local arrastrando = false
-local offsetX, offsetY = 0, 0
+-- Variables para arrastrar
+local UserInputService = game:GetService("UserInputService")
+local dragging = false
+local dragStart, startPos
 
-function love.load()
-    love.window.setTitle("Botón rojo movible")
-end
+-- Cuando empieza el toque/click
+boton.InputBegan:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.MouseButton1 or 
+	   input.UserInputType == Enum.UserInputType.Touch then
+		dragging = true
+		dragStart = input.Position
+		startPos = boton.Position
+	end
+end)
 
-function love.draw()
-    -- dibuja el botón
-    love.graphics.setColor(boton.color)
-    love.graphics.rectangle("fill", boton.x, boton.y, boton.width, boton.height)
-end
+-- Cuando termina el toque/click
+boton.InputEnded:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.MouseButton1 or 
+	   input.UserInputType == Enum.UserInputType.Touch then
+		dragging = false
+	end
+end)
 
-function love.touchpressed(id, x, y, dx, dy, pressure)
-    -- si tocamos dentro del botón, empezamos a arrastrar
-    if x >= boton.x and x <= boton.x + boton.width and
-       y >= boton.y and y <= boton.y + boton.height then
-        arrastrando = true
-        offsetX = x - boton.x
-        offsetY = y - boton.y
-    end
-end
-
-function love.touchmoved(id, x, y, dx, dy, pressure)
-    -- si estamos arrastrando, movemos el botón
-    if arrastrando then
-        boton.x = x - offsetX
-        boton.y = y - offsetY
-    end
-end
-
-function love.touchreleased(id, x, y, dx, dy, pressure)
-    arrastrando = false
-end
+-- Mientras mueves el dedo/mouse
+UserInputService.InputChanged:Connect(function(input)
+	if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement 
+		or input.UserInputType == Enum.UserInputType.Touch) then
+		local delta = input.Position - dragStart
+		boton.Position = UDim2.new(
+			startPos.X.Scale, startPos.X.Offset + delta.X,
+			startPos.Y.Scale, startPos.Y.Offset + delta.Y
+		)
+	end
+end)
