@@ -1,8 +1,6 @@
--- Creamos un ScreenGui
 local screenGui = Instance.new("ScreenGui")
 screenGui.Parent = game.Players.LocalPlayer:WaitForChild("PlayerGui")
 
--- Bola roja (drag)
 local bola = Instance.new("Frame")
 bola.Size = UDim2.new(0, 50, 0, 50)
 bola.Position = UDim2.new(0.5, -25, 0.5, -25)
@@ -13,12 +11,10 @@ local corner = Instance.new("UICorner")
 corner.CornerRadius = UDim.new(1, 0)
 corner.Parent = bola
 
--- Variables para arrastrar
 local UserInputService = game:GetService("UserInputService")
 local dragging = false
 local dragStart, startPos
 
--- Menú (oculto al inicio)
 local menu = Instance.new("Frame")
 menu.Size = UDim2.new(0, 220, 0, 150)
 menu.Position = UDim2.new(0.5, -110, 0.5, -150)
@@ -30,16 +26,14 @@ local corner2 = Instance.new("UICorner")
 corner2.CornerRadius = UDim.new(0.1, 0)
 corner2.Parent = menu
 
--- Botón Volar
 local FlyButton = Instance.new("TextButton")
 FlyButton.Size = UDim2.new(0, 200, 0, 50)
 FlyButton.Position = UDim2.new(0, 10, 0, 10)
-FlyButton.Text = "✈️ Activar/Desactivar Volar"
-FlyButton.BackgroundColor3 = Color3.fromRGB(70, 130, 180)
+FlyButton.Text = "Volar"
+FlyButton.BackgroundColor3 = Color3.fromRGB(71, 130, 180)
 FlyButton.TextColor3 = Color3.fromRGB(255, 255, 255)
 FlyButton.Parent = menu
 
--- Botón Velocidad
 local SpeedButton = Instance.new("TextButton")
 SpeedButton.Size = UDim2.new(0, 200, 0, 50)
 SpeedButton.Position = UDim2.new(0, 10, 0, 80)
@@ -48,7 +42,6 @@ SpeedButton.BackgroundColor3 = Color3.fromRGB(60, 179, 113)
 SpeedButton.TextColor3 = Color3.fromRGB(255, 255, 255)
 SpeedButton.Parent = menu
 
--- Animación LED del menú
 task.spawn(function()
 	while true do
 		for h = 0, 1, 0.01 do
@@ -58,7 +51,6 @@ task.spawn(function()
 	end
 end)
 
--- Abrir / cerrar menú al clickear la bola
 bola.InputBegan:Connect(function(input)
 	if input.UserInputType == Enum.UserInputType.MouseButton1 
 	or input.UserInputType == Enum.UserInputType.Touch then
@@ -66,7 +58,6 @@ bola.InputBegan:Connect(function(input)
 	end
 end)
 
--- Arrastrar la bola
 bola.InputBegan:Connect(function(input)
 	if input.UserInputType == Enum.UserInputType.MouseButton1 
 	or input.UserInputType == Enum.UserInputType.Touch then
@@ -94,15 +85,10 @@ UserInputService.InputChanged:Connect(function(input)
 	end
 end)
 
--- ========================
--- FUNCIONES DE LOS BOTONES
--- ========================
-
 local player = game.Players.LocalPlayer
 local character = player.Character or player.CharacterAdded:Wait()
 local humanoid = character:WaitForChild("Humanoid")
 
--- Velocidad
 local speedy = false
 local function toggleSpeed()
 	speedy = not speedy
