@@ -4,35 +4,32 @@
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local ServerScriptService = game:GetService("ServerScriptService")
-local StarterGui = game:GetService("StarterGui")
 
--- CONFIG -----------------------------------------------------
+-- CONFIGURACIÓN
 local CONFIG = {
-    maxPartsPerPlayer = 300,      -- partes permitidas por jugador (aprox)
-    maxTotalParts = 1500,         -- total partes en workspace antes de empezar a limpiar
-    maxEmittersPerPlayer = 40,    -- particle emitters por jugador
+    maxPartsPerPlayer = 300,
+    maxTotalParts = 1500,
+    maxEmittersPerPlayer = 40,
     maxSoundsPerPlayer = 30,
     maxExplosionsPerPlayer = 5,
     kickOnViolations = true,
     violationsUntilKick = 3,
-    ownerDetectRadius = 40,       -- si un objeto aparece cerca del character se asume dueño
-    remoteRateLimit = {           -- rate limit para remotos (calls por segundo)
+    ownerDetectRadius = 40,
+    remoteRateLimit = {
         maxCalls = 6,
         windowSeconds = 1.5,
     },
-    cleanupInterval = 0.6,        -- cada cuánto revisar (segundos)
-    enabled = true,               -- estado inicial del sistema
+    cleanupInterval = 0.6,
+    enabled = true,
 }
--- END CONFIG -------------------------------------------------
 
 -- Variable para controlar si el sistema está activo
 local antiLagEnabled = CONFIG.enabled
 
--- datos por jugador
+-- Datos por jugador
 local playerData = {}
 
--- crea un RemoteEvent para uso seguro (si quieres que tus propios remotes pasen por validación)
+-- Crear carpeta para remotos
 local safeRemoteFolder = ReplicatedStorage:FindFirstChild("SafeRemoteFolder")
 if not safeRemoteFolder then
     safeRemoteFolder = Instance.new("Folder")
@@ -52,11 +49,9 @@ getAntiLagStatusRemote.Parent = safeRemoteFolder
 -- Función para enviar la interfaz a todos los jugadores
 local function sendControlInterfaceToPlayers()
     for _, player in ipairs(Players:GetPlayers()) do
-        -- Crear la interfaz para el jugador
         local guiScript = Instance.new("LocalScript")
         guiScript.Name = "AntiLagControlGUI"
         
-        -- Script de la interfaz
         guiScript.Source = [[
             local Players = game:GetService("Players")
             local player = Players.LocalPlayer
@@ -73,7 +68,7 @@ local function sendControlInterfaceToPlayers()
             screenGui.Name = "AntiLagControl"
             screenGui.Parent = playerGui
             
-            -- Marco principal
+            -- Marco principal (se puede mover)
             local frame = Instance.new("Frame")
             frame.Size = UDim2.new(0, 200, 0, 100)
             frame.Position = UDim2.new(0, 10, 0, 10)
@@ -133,13 +128,9 @@ local function sendControlInterfaceToPlayers()
                 if status then
                     statusLabel.Text = "Estado: Activado"
                     statusLabel.TextColor3 = Color3.fromRGB(100, 255, 100)
-                    activateBtn.BackgroundColor3 = Color3.fromRGB(60, 180, 80)
-                    deactivateBtn.BackgroundColor3 = Color3.fromRGB(180, 60, 60)
                 else
                     statusLabel.Text = "Estado: Desactivado"
                     statusLabel.TextColor3 = Color3.fromRGB(255, 100, 100)
-                    activateBtn.BackgroundColor3 = Color3.fromRGB(30, 90, 40)
-                    deactivateBtn.BackgroundColor3 = Color3.fromRGB(90, 30, 30)
                 end
             end
             
@@ -164,21 +155,16 @@ end
 
 -- Configurar las RemoteFunctions
 toggleAntiLagRemote.OnServerInvoke = function(player, enable)
-    -- Solo permitir a admins cambiar el estado
-    if player:GetRankInGroup(0) > 0 then  -- Ajusta según tu sistema de permisos
-        antiLagEnabled = enable
-        print("AntiLag " .. (enable and "activado" or "desactivado") .. " por " .. player.Name)
-        return true
-    else
-        warn("Intento no autorizado de cambiar estado AntiLag por " .. player.Name)
-        return false
-    end
+    antiLagEnabled = enable
+    print("AntiLag " .. (enable and "activado" or "desactivado") .. " por " .. player.Name)
+    return true
 end
 
 getAntiLagStatusRemote.OnServerInvoke = function(player)
     return antiLagEnabled
 end
 
+-- Inicializar datos del jugador
 local function initPlayer(p)
     playerData[p.UserId] = {
         parts = 0,
@@ -190,11 +176,12 @@ local function initPlayer(p)
     }
 end
 
+-- Limpiar datos del jugador
 local function cleanupPlayerData(p)
     playerData[p.UserId] = nil
 end
 
--- util: devuelve jugador más cercano a una instancia (por distancia al HumanoidRootPart)
+-- Encontrar jugador más cercano a una instancia
 local function getNearestPlayerToInstance(inst)
     local nearestPlayer, nearestDist = nil, math.huge
     for _, p in pairs(Players:GetPlayers()) do
@@ -214,14 +201,13 @@ local function getNearestPlayerToInstance(inst)
     return nearestPlayer, nearestDist
 end
 
--- decide "propietario" aproximado de un objeto
+-- Determinar propietario aproximado de un objeto
 local function guessOwner(inst)
-    -- Si tiene atributo CreatorUserId lo usamos
     local attr = inst:GetAttribute and inst:GetAttribute("CreatorUserId")
     if attr and Players:GetPlayerByUserId(attr) then
         return Players:GetPlayerByUserId(attr)
     end
-    -- si la instancia tiene posición, buscamos jugador cercano
+    
     if inst:IsA("BasePart") or inst:GetPivot then
         local ok, _ = pcall(function() inst:GetPivot() end)
         if ok then
@@ -234,24 +220,21 @@ local function guessOwner(inst)
     return nil
 end
 
--- manejar nuevo objeto sospechoso
+-- Manejar nuevo objeto sospechoso
 local function handleNewInstance(inst)
-    if not antiLagEnabled then return end  -- No hacer nada si está desactivado
+    if not antiLagEnabled then return end
     if not inst or not inst.Parent then return end
 
-    -- Ignorar instancias del servicio Locked/CollectionService u objetos del propio sistema
     if inst:IsDescendantOf(ReplicatedStorage) then return end
 
     local typ = inst.ClassName
 
-    -- Solo checamos tipos que causan lag mayormente
     if inst:IsA("BasePart") or inst:IsA("ParticleEmitter") or inst:IsA("Sound") or inst:IsA("Explosion") or inst:IsA("Fire") or inst:IsA("Smoke") or inst:IsA("Beam") or inst:IsA("Trail") then
         local owner = guessOwner(inst)
         if owner then
             local d = playerData[owner.UserId]
             if not d then initPlayer(owner); d = playerData[owner.UserId] end
 
-            -- actualizar contadores aproximados por tipo
             if inst:IsA("BasePart") then
                 d.parts = d.parts + 1
             elseif inst:IsA("ParticleEmitter") then
@@ -262,24 +245,19 @@ local function handleNewInstance(inst)
                 d.explosions = d.explosions + 1
             end
 
-            -- chequeos por jugador
             if d.parts > CONFIG.maxPartsPerPlayer or d.emitters > CONFIG.maxEmittersPerPlayer or d.sounds > CONFIG.maxSoundsPerPlayer or d.explosions > CONFIG.maxExplosionsPerPlayer then
-                -- contamos una violación
                 d.violations = d.violations + 1
-                -- eliminamos el objeto inmediatamente
                 pcall(function() inst:Destroy() end)
                 warn(("AntiLag: Removed object of type %s from player %s (violation %d)"):format(typ, owner.Name, d.violations))
 
                 if CONFIG.kickOnViolations and d.violations >= CONFIG.violationsUntilKick then
-                    -- kick
                     pcall(function()
-                        owner:Kick("Se detectó comportamiento que causa lag. Si es legítimo, contacta al staff.")
+                        owner:Kick("Se detectó comportamiento que causa lag.")
                     end)
                 end
                 return
             end
         else
-            -- Sin owner aproximado: revisamos conteo global y limpiamos si workspace tiene demasiadas partes
             local totalParts = 0
             for _, v in pairs(workspace:GetDescendants()) do
                 if v:IsA("BasePart") then totalParts = totalParts + 1 end
@@ -293,109 +271,49 @@ local function handleNewInstance(inst)
     end
 end
 
--- conexión para detectar objetos nuevos en workspace
+-- Detectar objetos nuevos
 workspace.DescendantAdded:Connect(function(inst)
-    -- pequeño pcall por seguridad
     local ok, err = pcall(function() handleNewInstance(inst) end)
     if not ok then warn("AntiLag: error handling instance: "..tostring(err)) end
 end)
 
--- detectamos scripts colocados en Workspace (scripts maliciosos)
+-- Detectar scripts maliciosos
 workspace.ChildAdded:Connect(function(child)
-    if not antiLagEnabled then return end  -- No hacer nada si está desactivado
+    if not antiLagEnabled then return end
     
     if child:IsA("Script") or child:IsA("LocalScript") or child:IsA("ModuleScript") then
-        -- destruimos scripts que aparezcan en workspace directamente
         warn("AntiLag: Script added to Workspace -> removing: "..child:GetFullName())
         pcall(function() child:Destroy() end)
     end
 end)
 
--- FUNCTION: Create a "safe" RemoteEvent with server-side validation wrapper
-local function createSafeRemote(name)
-    local r = Instance.new("RemoteEvent")
-    r.Name = name
-    r.Parent = safeRemoteFolder
-
-    local function onServerInvoke(player, ...)
-        if not antiLagEnabled then return end  -- No hacer nada si está desactivado
-        
-        -- rate limiting:
-        local data = playerData[player.UserId]
-        if not data then initPlayer(player); data = playerData[player.UserId] end
-        local now = tick()
-        table.insert(data.recentRemoteTimestamps, now)
-        -- remove old timestamps
-        local cutoff = now - CONFIG.remoteRateLimit.windowSeconds
-        local i = 1
-        while i <= #data.recentRemoteTimestamps do
-            if data.recentRemoteTimestamps[i] < cutoff then
-                table.remove(data.recentRemoteTimestamps, i)
-            else
-                i = i + 1
-            end
-        end
-        if #data.recentRemoteTimestamps > CONFIG.remoteRateLimit.maxCalls then
-            data.violations = data.violations + 1
-            warn(("AntiLag: %s exceeded remote rate limit (calls=%d)"):format(player.Name, #data.recentRemoteTimestamps))
-            if data.violations >= CONFIG.violationsUntilKick then
-                pcall(function() player:Kick("Exceso de acciones sospechosas (rate limit).") end)
-            end
-            return
-        end
-
-        -- VALIDACIÓN BÁSICA de args (ejemplo): bloquear strings demasiado largos o tablas masivas
-        local args = {...}
-        for _, a in ipairs(args) do
-            if type(a) == "string" and #a > 500 then
-                warn("AntiLag: blocked oversized string from " .. player.Name)
-                return
-            elseif type(a) == "table" then
-                -- tables grandes podrían ser intento de spam; rechazamos tablas con >200 keys
-                local count = 0
-                for _ in pairs(a) do
-                    count = count + 1
-                    if count > 200 then break end
-                end
-                if count > 200 then
-                    warn("AntiLag: blocked oversized table from " .. player.Name)
-                    return
-                end
-            end
-        end
-
-        -- Si pasa validación: el desarrollador debe conectar r.OnServerEvent para manejar la acción
-        -- (No hacemos nada por defecto)
-    end
-
-    r.OnServerEvent:Connect(function(player, ...)
-        -- llamamos al validador que también puede ser usado para acciones
-        onServerInvoke(player, ...)
-    end)
-
-    return r
-end
-
--- crear un RemoteEvent por defecto (puedes crear más)
-createSafeRemote("SafeAction")
-
--- init players existentes y limpiar jugadores desconectados
+-- Inicializar jugadores existentes
 for _, p in pairs(Players:GetPlayers()) do initPlayer(p) end
-Players.PlayerAdded:Connect(initPlayer)
-Players.PlayerRemoving:Connect(cleanupPlayerData)
 
--- Enviar interfaz a jugadores cuando se unen
+-- Manejar jugadores que se unen/van
 Players.PlayerAdded:Connect(function(player)
     initPlayer(player)
-    wait(2) -- Esperar a que el cliente esté listo
+    wait(2)
     sendControlInterfaceToPlayers()
 end)
+
+Players.PlayerRemoving:Connect(cleanupPlayerData)
 
 -- Enviar interfaz a jugadores existentes
 sendControlInterfaceToPlayers()
 
--- limpieza periódica para prevenir contadores erróneos (recontar global rápido si hace falta)
+-- Limpieza periódica
 spawn(function()
     while true do
         if antiLagEnabled then
-            -- opcional: reducción gradual de contadores (
+            for uid, d in pairs(playerData) do
+                d.parts = math.max(0, d.parts - 12)
+                d.emitters = math.max(0, d.emitters - 3)
+                d.sounds = math.max(0, d.sounds - 3)
+            end
+        end
+        wait(CONFIG.cleanupInterval)
+    end
+end)
+
+print("AntiLag_Server iniciado con interfaz de control.")
