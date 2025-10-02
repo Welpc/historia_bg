@@ -5,6 +5,7 @@ local Players = game:GetService("Players")
 local TweenService = game:GetService("TweenService")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
+local SoundService = game:GetService("SoundService")
 
 local player = Players.LocalPlayer
 local gui = Instance.new("ScreenGui")
@@ -14,42 +15,43 @@ gui.Parent = player:WaitForChild("PlayerGui")
 
 -- Banner superior
 local banner = Instance.new("Frame")
-banner.Size = UDim2.new(1,0,0,80)
-banner.Position = UDim2.new(0,0,-0.2,0)
+banner.Size = UDim2.new(1, 0, 0, 80)
+banner.Position = UDim2.new(0, 0, -0.2, 0)
 banner.BackgroundColor3 = Color3.fromRGB(0, 150, 0)
 banner.BackgroundTransparency = 0.1
+banner.BorderSizePixel = 0
 banner.Parent = gui
 
 local title = Instance.new("TextLabel")
-title.Size = UDim2.new(1,0,1,0)
+title.Size = UDim2.new(1, 0, 1, 0)
 title.BackgroundTransparency = 1
 title.Font = Enum.Font.GothamBlack
 title.TextSize = 36
-title.TextColor3 = Color3.fromRGB(255,255,0)
+title.TextColor3 = Color3.fromRGB(255, 255, 0)
 title.TextStrokeTransparency = 0.5
 title.Text = "🌮 ¡EVENTO DE TACOS ACTIVADO! 🌮"
 title.Parent = banner
 
--- Sonido (puedes cambiar el ID por música mexicana o fiesta)
+-- Sonido de fiesta (ID de sonido de ejemplo)
 local sound = Instance.new("Sound")
-sound.SoundId = "rbxassetid://9120564323" -- cámbialo si quieres
-sound.Volume = 1
+sound.SoundId = "rbxassetid://9120564323" -- Puedes cambiar este ID
+sound.Volume = 0.7
 sound.Parent = gui
 
--- Partículas de tacos cayendo (usamos ImageLabels)
+-- Partículas de tacos cayendo
 local function spawnTaco()
 	local taco = Instance.new("ImageLabel")
-	taco.Size = UDim2.new(0,80,0,80)
-	taco.Position = UDim2.new(math.random(),0,-0.1,0)
+	taco.Size = UDim2.new(0, 80, 0, 80)
+	taco.Position = UDim2.new(math.random(), 0, -0.1, 0)
 	taco.BackgroundTransparency = 1
-	taco.Image = "rbxassetid://13092811742" -- imagen de taco, cámbialo si quieres
+	taco.Image = "rbxassetid://13092811742" -- Imagen de un taco
+	taco.Rotation = math.random(-30, 30)
 	taco.Parent = gui
 	
-	-- Tween hacia abajo
 	local tween = TweenService:Create(
 		taco,
 		TweenInfo.new(3, Enum.EasingStyle.Linear),
-		{Position = UDim2.new(taco.Position.X.Scale,0,1.2,0)}
+		{Position = UDim2.new(taco.Position.X.Scale, 0, 1.2, 0), Rotation = taco.Rotation + 180}
 	)
 	tween:Play()
 	tween.Completed:Connect(function()
@@ -57,23 +59,25 @@ local function spawnTaco()
 	end)
 end
 
--- Función principal
+-- Función principal que activa el evento
 local function playTacoEvent()
-	-- Muestra banner
-	TweenService:Create(banner, TweenInfo.new(0.5, Enum.EasingStyle.Bounce), {Position = UDim2.new(0,0,0,0)}):Play()
+	-- Mostrar banner con animación
+	local slideIn = TweenService:Create(banner, TweenInfo.new(0.5, Enum.EasingStyle.Bounce), {Position = UDim2.new(0, 0, 0, 0)})
+	slideIn:Play()
 	
-	-- Sonido
+	-- Reproducir sonido
 	pcall(function() sound:Play() end)
 	
-	-- Spawnear tacos durante unos segundos
-	for i=1,25 do
+	-- Generar tacos
+	for i = 1, 25 do
 		spawnTaco()
 		wait(0.2)
 	end
 	
-	-- Ocultar banner después de 6s
+	-- Ocultar banner después de 6 segundos
 	wait(6)
-	TweenService:Create(banner, TweenInfo.new(0.5), {Position = UDim2.new(0,0,-0.2,0)}):Play()
+	local slideOut = TweenService:Create(banner, TweenInfo.new(0.5, Enum.EasingStyle.Quad), {Position = UDim2.new(0, 0, -0.2, 0)})
+	slideOut:Play()
 end
 
 -- Activación con tecla T
@@ -86,9 +90,11 @@ end)
 
 -- Botón opcional en pantalla
 local btn = Instance.new("TextButton")
-btn.Size = UDim2.new(0,160,0,40)
-btn.Position = UDim2.new(1,-180,1,-60)
+btn.Size = UDim2.new(0, 160, 0, 40)
+btn.Position = UDim2.new(1, -180, 1, -60)
 btn.Text = "🌮 Activar Evento"
-btn.BackgroundColor3 = Color3.fromRGB(255,200,0)
+btn.BackgroundColor3 = Color3.fromRGB(255, 200, 0)
+btn.TextColor3 = Color3.fromRGB(0, 0, 0)
+btn.Font = Enum.Font.GothamBold
 btn.Parent = gui
 btn.MouseButton1Click:Connect(playTacoEvent)
