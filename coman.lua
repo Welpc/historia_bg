@@ -1,52 +1,54 @@
+-- Script combinado para el Panel de Administración Universal
 local Players = game:GetService("Players")
+local UserInputService = game:GetService("UserInputService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local TweenService = game:GetService("TweenService")
 local DataStoreService = game:GetService("DataStoreService")
 local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
 local InsertService = game:GetService("InsertService")
-local TweenService = game:GetService("TweenService")
-local BillsStore = DataStoreService:GetDataStore("PlayerBilletes")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+-- Servicios para eventos multi-servidor
 local MessagingService = game:GetService("MessagingService")
 local JobId = game.JobId
 
--- ============================================
--- VARIABLES GLOBALES
--- ============================================
-local MultiServerEvents = {
-	ActiveEvents = {}
-}
+-- Variables del sistema
+local player = Players.LocalPlayer
+local playerGui = player:WaitForChild("PlayerGui")
 
+-- DataStores
+local BillsStore = DataStoreService:GetDataStore("PlayerBilletes")
+local MultiServerStore = DataStoreService:GetDataStore("MultiServerEvents")
+
+-- Módulo de meteoritos
 local MeteorShowerModule
 local hasMeteorModule = pcall(function()
 	MeteorShowerModule = require(script.Parent:WaitForChild("MeteorShowerModule"))
 end)
 
--- Variables para controlar el sistema de humo
+-- Variables de control
 local humoActivo = false
 local tiempoHumo = 300
 local humoTween
-
--- Variables para controlar el modo cámara
 local primeraPersonaActivada = false
-
--- Variables para controlar la música
 local mainMusic = Workspace:FindFirstChild("MainMusic")
 local customMusicPlaying = false
-
--- Configuración del sistema de humo
-local fuegoID = 8651011854
-local cantidadFuego = 1000
-
--- Variables de lluvia
 local lluviaActiva = false
 local lluviaGrandeId = 5338590536
 local lluviaChicaId = 4451256888
 local lluviaObjeto = nil
 local lluviaParticulas = {}
 
--- ============================================
--- CREAR REMOTEEVENTS
--- ============================================
+-- Tabla para controlar eventos entre servidores
+local MultiServerEvents = {
+	ActiveEvents = {}
+}
+
+-- Configuración del sistema de humo
+local fuegoID = 8651011854
+local cantidadFuego = 1000
+
+-- RemoteEvents
 local MeteorEvent = Instance.new("RemoteEvent")
 MeteorEvent.Name = "MeteorEvent"
 MeteorEvent.Parent = ReplicatedStorage
@@ -87,53 +89,244 @@ local MessageEvent = Instance.new("RemoteEvent")
 MessageEvent.Name = "MessageEvent"
 MessageEvent.Parent = ReplicatedStorage
 
--- ============================================
--- FUNCIONES AUXILIARES
--- ============================================
+-- FUNCIONES DEL SERVIDOR
+-- Función para enviar mensaje a un jugador
 local function sendMessageToPlayer(player, text, color)
 	if player and player.Character and player.Character:FindFirstChild("Head") then
 		local chatService = game:GetService("Chat")
-		chatService:Chat(player.Character.Head, text, color or Enum.ChatColor.White)
+		chatService:Chat(player.Character.Head, text, color)
 	end
 end
 
+-- Función para enviar mensaje a todos los jugadores
 local function broadcastMessage(text, color)
 	for _, player in ipairs(Players:GetPlayers()) do
 		sendMessageToPlayer(player, text, color)
 	end
 end
 
+-- Función para publicar eventos en todos los servidores
 local function publishToAllServers(eventName, data)
-	if eventName == "MultiServerMessage" then
-		local success, errorMessage = pcall(function()
-			MessagingService:PublishAsync("MultiServerMessage", {
-				Sender = JobId,
-				Data = data,
-				Timestamp = os.time()
-			})
-		end)
+	local success, errorMessage = pcall(function()
+		MessagingService:PublishAsync(eventName, {
+			Sender = JobId,
+			Data = data,
+			Timestamp = os.time()
+		})
+	end)
 
-		if not success then
-			warn("Error al publicar mensaje multi-servidor: " .. tostring(errorMessage))
+	if not success then
+		warn("Error al publicar evento " .. eventName .. ": " .. tostring(errorMessage))
+	end
+end
+
+-- Función para manejar eventos entrantes de otros servidores
+local function handleIncomingEvent(eventName, data)
+	if data.Sender == JobId then
+		return
+	end
+
+	print("Evento recibido de otro servidor: " .. eventName)
+
+	if eventName == "MultiServerHumo" then
+		if data.Data.Action == "start" then
+			activarSistemaHumo(data.Data.Duration)
+			MultiServerEvents.ActiveEvents["Humo"] = {
+				StartTime = os.time(),
+				Duration = data.Data.Duration
+			}
+		elseif data.Data.Action == "stop" then
+			desactivarSistemaHumo()
+			MultiServerEvents.ActiveEvents["Humo"] = nil
 		end
-	else
-		local success, errorMessage = pcall(function()
-			MessagingService:PublishAsync(eventName, {
-				Sender = JobId,
-				Data = data,
-				Timestamp = os.time()
-			})
-		end)
+	elseif eventName == "MultiServerLluvia" then
+		if data.Data.Action == "start" then
+			activarLluvia()
+			MultiServerEvents.ActiveEvents["Lluvia"] = { StartTime = os.time() }
+		elseif data.Data.Action == "stop" then
+			desactivarLluvia()
+			MultiServerEvents.ActiveEvents["Lluvia"] = nil
+		end
+	elseif eventName == "MultiServerMeteoros" then
+		if data.Data.Action == "start" then
+			activateMeteorEvent(data.Data.Duration)
+			MultiServerEvents.ActiveEvents["Meteoros"] = {
+				StartTime = os.time(),
+				Duration = data.Data.Duration
+			}
+		elseif data.Data.Action == "stop" then
+			stopMeteorEvent()
+			MultiServerEvents.ActiveEvents["Meteoros"] = nil
+		end
+	elseif eventName == "MultiServerMusica" then
+		if data.Data.Action == "play" then
+			playAudio(data.Data.AudioId)
+			MultiServerEvents.ActiveEvents["Musica"] = {
+				StartTime = os.time(),
+				AudioId = data.Data.AudioId
+			}
+		elseif data.Data.Action == "stop" then
+			stopAudio()
+			MultiServerEvents.ActiveEvents["Musica"] = nil
+		end
+	elseif eventName == "MultiServerMessage" then
+		for _, targetPlayer in ipairs(Players:GetPlayers()) do
+			local targetGui = targetPlayer:FindFirstChild("PlayerGui")
+			if targetGui then
+				local messageGui = targetGui:FindFirstChild("GlobalMessageGui")
+				if messageGui then
+					messageGui:Destroy()
+				end
 
-		if not success then
-			warn("Error al publicar evento " .. eventName .. ": " .. tostring(errorMessage))
+				local screenGui = Instance.new("ScreenGui")
+				screenGui.Name = "GlobalMessageGui"
+				screenGui.Parent = targetGui
+				screenGui.ResetOnSpawn = false
+				screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+
+				local messageFrame = Instance.new("Frame")
+				messageFrame.Size = UDim2.new(1, 0, 0, 60)
+				messageFrame.Position = UDim2.new(0, 0, 0.1, 0)
+				messageFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+				messageFrame.BackgroundTransparency = 1
+				messageFrame.BorderSizePixel = 0
+				messageFrame.Parent = screenGui
+
+				local messageLabel = Instance.new("TextLabel")
+				messageLabel.Size = UDim2.new(1, -20, 1, -10)
+				messageLabel.Position = UDim2.new(0, 10, 0, 5)
+				messageLabel.BackgroundTransparency = 1
+				messageLabel.Text = data.Data.Message
+				messageLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+				messageLabel.TextScaled = true
+				messageLabel.Font = Enum.Font.GothamBold
+				messageLabel.TextWrapped = true
+				messageLabel.Parent = messageFrame
+
+				messageFrame.Position = UDim2.new(0, 0, -0.1, 0)
+				local tween = TweenService:Create(
+					messageFrame,
+					TweenInfo.new(0.5, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+					{Position = UDim2.new(0, 0, 0.1, 0)}
+				)
+				tween:Play()
+
+				delay(10, function()
+					if messageFrame and messageFrame.Parent then
+						local exitTween = TweenService:Create(
+							messageFrame,
+							TweenInfo.new(0.5, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+							{Position = UDim2.new(0, 0, -0.1, 0)}
+						)
+						exitTween:Play()
+						exitTween.Completed:Connect(function()
+							screenGui:Destroy()
+						end)
+					end
+				end)
+			end
 		end
 	end
 end
 
--- ============================================
--- SISTEMA DE CÁMARA EN PRIMERA PERSONA
--- ============================================
+-- Función para manejar mensajes globales
+local function handleGlobalMessage(player, message, allServers)
+	if allServers then
+		publishToAllServers("MultiServerMessage", {
+			Message = message,
+			Timestamp = os.time()
+		})
+	end
+
+	for _, targetPlayer in ipairs(Players:GetPlayers()) do
+		local targetGui = targetPlayer:FindFirstChild("PlayerGui")
+		if targetGui then
+			local messageGui = targetGui:FindFirstChild("GlobalMessageGui")
+			if messageGui then
+				messageGui:Destroy()
+			end
+
+			local screenGui = Instance.new("ScreenGui")
+			screenGui.Name = "GlobalMessageGui"
+			screenGui.Parent = targetGui
+			screenGui.ResetOnSpawn = false
+			screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+
+			local messageFrame = Instance.new("Frame")
+			messageFrame.Size = UDim2.new(1, 0, 0, 60)
+			messageFrame.Position = UDim2.new(0, 0, 0.1, 0)
+			messageFrame.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+			messageFrame.BackgroundTransparency = 1
+			messageFrame.BorderSizePixel = 0
+			messageFrame.Parent = screenGui
+
+			local messageLabel = Instance.new("TextLabel")
+			messageLabel.Size = UDim2.new(1, -20, 1, -10)
+			messageLabel.Position = UDim2.new(0, 10, 0, 5)
+			messageLabel.BackgroundTransparency = 1
+			messageLabel.Text = message
+			messageLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+			messageLabel.TextScaled = true
+			messageLabel.Font = Enum.Font.GothamBold
+			messageLabel.TextWrapped = true
+			messageLabel.Parent = messageFrame
+
+			messageFrame.Position = UDim2.new(0, 0, -0.1, 0)
+			local tween = TweenService:Create(
+				messageFrame,
+				TweenInfo.new(0.5, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+				{Position = UDim2.new(0, 0, 0.1, 0)}
+			)
+			tween:Play()
+
+			delay(10, function()
+				if messageFrame and messageFrame.Parent then
+					local exitTween = TweenService:Create(
+						messageFrame,
+						TweenInfo.new(0.5, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+						{Position = UDim2.new(0, 0, -0.1, 0)}
+					)
+					exitTween:Play()
+					exitTween.Completed:Connect(function()
+						screenGui:Destroy()
+					end)
+				end
+			end)
+		end
+	end
+
+	print("Mensaje global enviado por " .. player.Name .. ": " .. message)
+end
+
+-- Suscribirse a los eventos multi-servidor
+local function subscribeToEvents()
+	pcall(function()
+		MessagingService:SubscribeAsync("MultiServerHumo", function(message)
+			handleIncomingEvent("MultiServerHumo", message.Data)
+		end)
+
+		MessagingService:SubscribeAsync("MultiServerLluvia", function(message)
+			handleIncomingEvent("MultiServerLluvia", message.Data)
+		end)
+
+		MessagingService:SubscribeAsync("MultiServerMeteoros", function(message)
+			handleIncomingEvent("MultiServerMeteoros", message.Data)
+		end)
+
+		MessagingService:SubscribeAsync("MultiServerMusica", function(message)
+			handleIncomingEvent("MultiServerMusica", message.Data)
+		end)
+
+		MessagingService:SubscribeAsync("MultiServerMessage", function(message)
+			handleIncomingEvent("MultiServerMessage", message.Data)
+		end)
+	end)
+end
+
+-- Iniciar suscripciones
+subscribeToEvents()
+
+-- Función para forzar primera persona
 local function forzarPrimeraPersona(player)
 	player.CameraMode = Enum.CameraMode.LockFirstPerson
 
@@ -148,6 +341,7 @@ local function forzarPrimeraPersona(player)
 	print("📷 Cámara en primera persona forzada para: " .. player.Name)
 end
 
+-- Función para restaurar cámara normal
 local function restaurarCamaraNormal(player)
 	player.CameraMode = Enum.CameraMode.Classic
 
@@ -162,6 +356,7 @@ local function restaurarCamaraNormal(player)
 	print("📷 Cámara restaurada para: " .. player.Name)
 end
 
+-- Función para activar/desactivar primera persona para todos
 local function togglePrimeraPersona(activar)
 	primeraPersonaActivada = activar
 
@@ -178,9 +373,7 @@ local function togglePrimeraPersona(activar)
 	end
 end
 
--- ============================================
--- SISTEMA DE HUMO
--- ============================================
+-- Función para limpiar humo existente
 local function limpiarHumo()
 	local humosEliminados = 0
 
@@ -209,6 +402,7 @@ local function limpiarHumo()
 	return humosEliminados
 end
 
+-- Función para crear el sistema de humo
 local function crearSistemaHumo()
 	local pasto1 = Workspace:FindFirstChild("pasto1")
 	if not pasto1 then
@@ -290,9 +484,10 @@ local function crearSistemaHumo()
 	return true
 end
 
+-- Función para activar el sistema de humo
 local function activarSistemaHumo(duracionMinutos)
 	if humoActivo then
-		broadcastMessage("Evento de humo ya está activo!", Enum.ChatColor.Yellow)
+		broadcastMessage("evento2 ya está activo!", "Yellow")
 		return
 	end
 
@@ -300,13 +495,13 @@ local function activarSistemaHumo(duracionMinutos)
 
 	local exito = crearSistemaHumo()
 	if not exito then
-		broadcastMessage("❌ Error al crear el sistema de humo", Enum.ChatColor.Red)
+		broadcastMessage("❌ Error al crear el sistema de humo", "Red")
 		return
 	end
 
 	humoActivo = true
-	broadcastMessage("💨 HUMO ACTIVADO por " .. duracionMinutos .. " minutos", Enum.ChatColor.Green)
-	broadcastMessage("📷 Cámara en primera persona activada", Enum.ChatColor.Green)
+	broadcastMessage("ACTIVO " .. duracionMinutos .. " minutos", "Green")
+	broadcastMessage("Cámara en primera persona", "Green")
 
 	spawn(function()
 		local tiempoRestante = tiempoHumo
@@ -314,7 +509,7 @@ local function activarSistemaHumo(duracionMinutos)
 			if tiempoRestante % 60 == 0 or tiempoRestante <= 10 then
 				local minutos = math.floor(tiempoRestante / 60)
 				local segundos = tiempoRestante % 60
-				broadcastMessage("💨 Humo activo: " .. minutos .. "m " .. segundos .. "s restantes", Enum.ChatColor.Yellow)
+				broadcastMessage("Humo activo: " .. minutos .. "m " .. segundos .. "s restantes", "Yellow")
 			end
 			wait(1)
 			tiempoRestante = tiempoRestante - 1
@@ -322,14 +517,15 @@ local function activarSistemaHumo(duracionMinutos)
 
 		if humoActivo then
 			desactivarSistemaHumo()
-			broadcastMessage("💨 EVENTO DE HUMO TERMINADO", Enum.ChatColor.Blue)
+			broadcastMessage("TERMINADO", "Blue")
 		end
 	end)
 end
 
+-- Función para desactivar el sistema de humo
 local function desactivarSistemaHumo()
 	if not humoActivo then
-		broadcastMessage("No hay evento de humo activo", Enum.ChatColor.Yellow)
+		broadcastMessage("evento2 no activo", "Yellow")
 		return
 	end
 
@@ -338,14 +534,12 @@ local function desactivarSistemaHumo()
 
 	togglePrimeraPersona(false)
 
-	broadcastMessage("💨 Evento de humo desactivado", Enum.ChatColor.Blue)
-	broadcastMessage("📷 Cámara restaurada a normal", Enum.ChatColor.Blue)
-	print("Evento de humo desactivado. Humos eliminados: " .. humosEliminados)
+	broadcastMessage("Evento2 desactivado. ", "Blue")
+	broadcastMessage("Camara primera", "Blue")
+	print("evento2 desactivado. Humos eliminados: " .. humosEliminados)
 end
 
--- ============================================
--- SISTEMA DE LLUVIA
--- ============================================
+-- Función para hacer invisibles y sin colisión los parts de un modelo
 local function configurarModelo(modelo)
 	for _, obj in ipairs(modelo:GetDescendants()) do
 		if obj:IsA("BasePart") then
@@ -357,6 +551,7 @@ local function configurarModelo(modelo)
 	end
 end
 
+-- Función para activar lluvia
 local function activarLluvia()
 	if lluviaActiva then
 		return
@@ -381,9 +576,7 @@ local function activarLluvia()
 			modelo.Name = "LluviaActiva"
 			local offsetY = 40
 			modelo:PivotTo(pasto1.CFrame * CFrame.new(0, offsetY, 0))
-
 			configurarModelo(modelo)
-
 			lluviaObjeto = modelo
 		end
 	end
@@ -420,9 +613,9 @@ local function activarLluvia()
 
 	lluviaActiva = true
 	print("✅ Lluvia activada con " .. lluviasCreadas .. " partículas en pasto1")
-	broadcastMessage("🌧️ LLUVIA ACTIVADA", Enum.ChatColor.Blue)
 end
 
+-- Función para desactivar lluvia
 local function desactivarLluvia()
 	if not lluviaActiva then
 		return
@@ -444,32 +637,29 @@ local function desactivarLluvia()
 
 	lluviaActiva = false
 	print("✅ Lluvia desactivada. Partículas eliminadas: " .. lluviasEliminadas)
-	broadcastMessage("🌧️ LLUVIA DESACTIVADA", Enum.ChatColor.Blue)
 end
 
--- ============================================
--- SISTEMA DE METEORITOS
--- ============================================
+-- Función para activar el evento de meteoritos
 local function activateMeteorEvent(duration)
 	if not hasMeteorModule then
-		broadcastMessage("El módulo de meteoritos no está disponible", Enum.ChatColor.Red)
+		broadcastMessage("El módulo de meteoritos no está disponible", "Red")
 		return
 	end
 
 	if MeteorShowerModule.Active then
-		broadcastMessage("Ya hay un evento de meteoritos activo", Enum.ChatColor.Yellow)
+		broadcastMessage("evento de meteoritos existente", "Yellow")
 		return
 	end
 
 	print("Activando evento continuo de meteoritos por " .. duration .. " segundos")
 	MeteorShowerModule:StartContinuousEvent(duration)
-	broadcastMessage("☄️ ¡LLUVIA DE METEORITOS! ¡Cuidado!", Enum.ChatColor.Red)
+	broadcastMessage("¡LLUVIA DE METEORITOS! ¡Cuidado!", "Green")
 
 	spawn(function()
 		for i = duration, 1, -10 do
 			if not MeteorShowerModule.Active then break end
 			if i % 30 == 0 or i <= 10 then
-				broadcastMessage("☄️ Meteoritos por " .. i .. " segundos más...", Enum.ChatColor.Yellow)
+				broadcastMessage("Meteoritos por " .. i .. " segundos más...", "Yellow")
 			end
 			wait(10)
 		end
@@ -478,28 +668,27 @@ local function activateMeteorEvent(duration)
 	spawn(function()
 		wait(duration)
 		if not MeteorShowerModule.Active then return end
-		broadcastMessage("☄️ Evento de meteoritos terminado", Enum.ChatColor.Blue)
+		broadcastMessage("evento terminado", "Blue")
 	end)
 end
 
+-- Función para detener meteoritos
 local function stopMeteorEvent()
 	if not hasMeteorModule then
-		broadcastMessage("El módulo de meteoritos no está disponible", Enum.ChatColor.Red)
+		broadcastMessage("El módulo de meteoritos no está disponible", "Red")
 		return
 	end
 
 	if not MeteorShowerModule.Active then
-		broadcastMessage("No hay evento activo para detener", Enum.ChatColor.Yellow)
+		broadcastMessage("No hay evento activo para detener", "Yellow")
 		return
 	end
 
 	MeteorShowerModule:StopEvent()
-	broadcastMessage("☄️ Evento de meteoritos detenido", Enum.ChatColor.Blue)
+	broadcastMessage("Evento apagado", "Blue")
 end
 
--- ============================================
--- SISTEMA DE AUDIO
--- ============================================
+-- Función para reproducir audio
 local function playAudio(audioId)
 	if not mainMusic then
 		mainMusic = Workspace:FindFirstChild("MainMusic")
@@ -530,16 +719,15 @@ local function playAudio(audioId)
 			mainMusic:Play()
 			print("Música principal restaurada")
 		end
-
 		newSound:Destroy()
 	end)
 
 	newSound:Play()
 	customMusicPlaying = true
 	print("¡Reproduciendo audio personalizado! ID: " .. audioId)
-	broadcastMessage("🎵 Reproduciendo audio personalizado", Enum.ChatColor.Green)
 end
 
+-- Función para detener audio
 local function stopAudio()
 	local currentCustomMusic = Workspace:FindFirstChild("BackgroundMusic")
 	if currentCustomMusic and currentCustomMusic:IsA("Sound") then
@@ -553,197 +741,9 @@ local function stopAudio()
 		mainMusic:Play()
 		print("Música principal restaurada")
 	end
-	
-	broadcastMessage("🎵 Audio detenido", Enum.ChatColor.Blue)
 end
 
--- ============================================
--- SISTEMA DE MENSAJES GLOBALES
--- ============================================
-local function handleGlobalMessage(player, message, allServers)
-	if allServers then
-		publishToAllServers("MultiServerMessage", {
-			Message = message,
-			Timestamp = os.time()
-		})
-	end
-
-	for _, targetPlayer in ipairs(Players:GetPlayers()) do
-		local targetGui = targetPlayer:FindFirstChild("PlayerGui")
-		if targetGui then
-			local messageGui = targetGui:FindFirstChild("GlobalMessageGui")
-			if messageGui then
-				messageGui:Destroy()
-			end
-
-			local screenGui = Instance.new("ScreenGui")
-			screenGui.Name = "GlobalMessageGui"
-			screenGui.Parent = targetGui
-			screenGui.ResetOnSpawn = false
-			screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-
-			local messageFrame = Instance.new("Frame")
-			messageFrame.Size = UDim2.new(1, 0, 0, 60)
-			messageFrame.Position = UDim2.new(0, 0, 0.1, 0)
-			messageFrame.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
-			messageFrame.BackgroundTransparency = 0.3
-			messageFrame.BorderSizePixel = 0
-			messageFrame.Parent = screenGui
-
-			local messageLabel = Instance.new("TextLabel")
-			messageLabel.Size = UDim2.new(1, -20, 1, -10)
-			messageLabel.Position = UDim2.new(0, 10, 0, 5)
-			messageLabel.BackgroundTransparency = 1
-			messageLabel.Text = message
-			messageLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
-			messageLabel.TextScaled = true
-			messageLabel.Font = Enum.Font.GothamBold
-			messageLabel.TextWrapped = true
-			messageLabel.Parent = messageFrame
-
-			messageFrame.Position = UDim2.new(0, 0, -0.1, 0)
-			local tween = TweenService:Create(
-				messageFrame,
-				TweenInfo.new(0.5, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
-				{Position = UDim2.new(0, 0, 0.1, 0)}
-			)
-			tween:Play()
-
-			delay(10, function()
-				if messageFrame and messageFrame.Parent then
-					local exitTween = TweenService:Create(
-						messageFrame,
-						TweenInfo.new(0.5, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
-						{Position = UDim2.new(0, 0, -0.1, 0)}
-					)
-					exitTween:Play()
-					exitTween.Completed:Connect(function()
-						screenGui:Destroy()
-					end)
-				end
-			end)
-		end
-	end
-
-	print("Mensaje global enviado por " .. player.Name .. ": " .. message)
-end
-
--- ============================================
--- SUSCRIPCIÓN A EVENTOS MULTI-SERVIDOR
--- ============================================
-local function subscribeToEvents()
-	pcall(function()
-		MessagingService:SubscribeAsync("MultiServerHumo", function(message)
-			if message.Data.Sender == JobId then return end
-			
-			if message.Data.Data.Action == "start" then
-				activarSistemaHumo(message.Data.Data.Duration)
-			elseif message.Data.Data.Action == "stop" then
-				desactivarSistemaHumo()
-			end
-		end)
-
-		MessagingService:SubscribeAsync("MultiServerLluvia", function(message)
-			if message.Data.Sender == JobId then return end
-			
-			if message.Data.Data.Action == "start" then
-				activarLluvia()
-			elseif message.Data.Data.Action == "stop" then
-				desactivarLluvia()
-			end
-		end)
-
-		MessagingService:SubscribeAsync("MultiServerMeteoros", function(message)
-			if message.Data.Sender == JobId then return end
-			
-			if message.Data.Data.Action == "start" then
-				activateMeteorEvent(message.Data.Data.Duration)
-			elseif message.Data.Data.Action == "stop" then
-				stopMeteorEvent()
-			end
-		end)
-
-		MessagingService:SubscribeAsync("MultiServerMusica", function(message)
-			if message.Data.Sender == JobId then return end
-			
-			if message.Data.Data.Action == "play" then
-				playAudio(message.Data.Data.AudioId)
-			elseif message.Data.Data.Action == "stop" then
-				stopAudio()
-			end
-		end)
-
-		MessagingService:SubscribeAsync("MultiServerMessage", function(message)
-			if message.Data
-						.Sender == JobId then return end
-			
-			for _, targetPlayer in ipairs(Players:GetPlayers()) do
-				local targetGui = targetPlayer:FindFirstChild("PlayerGui")
-				if targetGui then
-					local messageGui = targetGui:FindFirstChild("GlobalMessageGui")
-					if messageGui then
-						messageGui:Destroy()
-					end
-
-					local screenGui = Instance.new("ScreenGui")
-					screenGui.Name = "GlobalMessageGui"
-					screenGui.Parent = targetGui
-					screenGui.ResetOnSpawn = false
-					screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-
-					local messageFrame = Instance.new("Frame")
-					messageFrame.Size = UDim2.new(1, 0, 0, 60)
-					messageFrame.Position = UDim2.new(0, 0, 0.1, 0)
-					messageFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
-					messageFrame.BackgroundTransparency = 0.3
-					messageFrame.BorderSizePixel = 0
-					messageFrame.Parent = screenGui
-
-					local messageLabel = Instance.new("TextLabel")
-					messageLabel.Size = UDim2.new(1, -20, 1, -10)
-					messageLabel.Position = UDim2.new(0, 10, 0, 5)
-					messageLabel.BackgroundTransparency = 1
-					messageLabel.Text = message.Data.Data.Message
-					messageLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
-					messageLabel.TextScaled = true
-					messageLabel.Font = Enum.Font.GothamBold
-					messageLabel.TextWrapped = true
-					messageLabel.Parent = messageFrame
-
-					messageFrame.Position = UDim2.new(0, 0, -0.1, 0)
-					local tween = TweenService:Create(
-						messageFrame,
-						TweenInfo.new(0.5, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
-						{Position = UDim2.new(0, 0, 0.1, 0)}
-					)
-					tween:Play()
-
-					delay(10, function()
-						if messageFrame and messageFrame.Parent then
-							local exitTween = TweenService:Create(
-								messageFrame,
-								TweenInfo.new(0.5, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
-								{Position = UDim2.new(0, 0, -0.1, 0)}
-							)
-							exitTween:Play()
-							exitTween.Completed:Connect(function()
-								screenGui:Destroy()
-							end)
-						end
-					end)
-				end
-			end
-		end)
-	end)
-end
-
-subscribeToEvents()
-
--- ============================================
--- DATASTORE MULTI-SERVIDOR
--- ============================================
-local MultiServerStore = DataStoreService:GetDataStore("MultiServerEvents")
-
+-- Función para publicar eventos multi-servidor usando DataStore
 local function publishToAllServersDataStore(eventType, action, data)
 	local eventData = {
 		Action = action,
@@ -761,6 +761,7 @@ local function publishToAllServersDataStore(eventType, action, data)
 	end
 end
 
+-- Función para verificar y ejecutar eventos multi-servidor
 local function checkMultiServerEvents()
 	while true do
 		local eventsToCheck = {"Humo", "Lluvia", "Meteoros", "Musica"}
@@ -828,16 +829,11 @@ local function checkMultiServerEvents()
 	end
 end
 
+-- Iniciar la verificación de eventos multi-servidor
 spawn(checkMultiServerEvents)
 
--- ============================================
--- MANEJADORES DE EVENTOS (SIN RESTRICCIONES)
--- ============================================
-
--- METEORITOS
+-- Manejadores de eventos del servidor
 MeteorEvent.OnServerEvent:Connect(function(player, action, duration)
-	print("🎮 " .. player.Name .. " ejecutó comando de meteoritos: " .. action)
-	
 	if action == "start" then
 		activateMeteorEvent(duration or 240)
 	elseif action == "stop" then
@@ -845,10 +841,7 @@ MeteorEvent.OnServerEvent:Connect(function(player, action, duration)
 	end
 end)
 
--- HUMO
 HumoEvent.OnServerEvent:Connect(function(player, action, duracionMinutos)
-	print("🎮 " .. player.Name .. " ejecutó comando de humo: " .. action)
-	
 	if action == "start" then
 		activarSistemaHumo(duracionMinutos or 5)
 	elseif action == "stop" then
@@ -856,10 +849,7 @@ HumoEvent.OnServerEvent:Connect(function(player, action, duracionMinutos)
 	end
 end)
 
--- LLUVIA
 LluviaEvent.OnServerEvent:Connect(function(player, action)
-	print("🎮 " .. player.Name .. " ejecutó comando de lluvia: " .. action)
-	
 	if action == "start" then
 		activarLluvia()
 	elseif action == "stop" then
@@ -867,105 +857,72 @@ LluviaEvent.OnServerEvent:Connect(function(player, action)
 	end
 end)
 
--- AUDIO
 AudioEvent.OnServerEvent:Connect(function(player, action, audioId)
-	print("🎮 " .. player.Name .. " ejecutó comando de audio: " .. action)
-	
 	if action == "play" then
 		playAudio(audioId)
-		sendMessageToPlayer(player, "🎵 Reproduciendo audio ID: " .. audioId, Enum.ChatColor.Green)
+		sendMessageToPlayer(player, "Reproduciendo audio ID: " .. audioId, "Green")
 	elseif action == "stop" then
 		stopAudio()
-		sendMessageToPlayer(player, "🎵 Audio detenido", Enum.ChatColor.Green)
+		sendMessageToPlayer(player, "Audio detenido", "Green")
 	end
 end)
 
--- VELOCIDAD
 SpeedEvent.OnServerEvent:Connect(function(player, speed)
-	print("🎮 " .. player.Name .. " cambió velocidad a: " .. speed)
-	
 	if player.Character then
 		local humanoid = player.Character:FindFirstChild("Humanoid")
 		if humanoid then
 			humanoid.WalkSpeed = speed
-			sendMessageToPlayer(player, "⚡ Velocidad establecida a " .. speed, Enum.ChatColor.Green)
+			sendMessageToPlayer(player, "Velocidad establecida a " .. speed, "Green")
 		end
 	end
 end)
 
--- VUELO
 FlyEvent.OnServerEvent:Connect(function(player, action)
-	print("🎮 " .. player.Name .. " ejecutó comando de vuelo: " .. action)
-	
 	if action == "enable" then
-		sendMessageToPlayer(player, "✈️ Vuelo activado", Enum.ChatColor.Green)
+		sendMessageToPlayer(player, "Vuelo activado", "Green")
 	elseif action == "disable" then
-		sendMessageToPlayer(player, "✈️ Vuelo desactivado", Enum.ChatColor.Green)
+		sendMessageToPlayer(player, "Vuelo desactivado", "Green")
 	end
 end)
 
--- BILLETES (DINERO)
 MoneyEvent.OnServerEvent:Connect(function(player, action, amount)
-	print("🎮 " .. player.Name .. " ejecutó comando de billetes: " .. action .. " - " .. amount)
-	
 	local leaderstats = player:FindFirstChild("leaderstats")
 	if leaderstats then
 		local billetes = leaderstats:FindFirstChild("Billetes")
 		if billetes then
 			if action == "add" then
 				billetes.Value = billetes.Value + amount
-				sendMessageToPlayer(player, "💰 Se agregaron $" .. amount .. " billetes", Enum.ChatColor.Green)
+				sendMessageToPlayer(player, "Se agregaron $" .. amount .. " billetes", "Green")
 			elseif action == "set" then
 				billetes.Value = amount
-				sendMessageToPlayer(player, "💰 Billetes establecidos a $" .. amount, Enum.ChatColor.Green)
+				sendMessageToPlayer(player, "Billetes establecidos a $" .. amount, "Green")
 			elseif action == "remove" then
 				billetes.Value = math.max(0, billetes.Value - amount)
-				sendMessageToPlayer(player, "💰 Se quitaron $" .. amount .. " billetes", Enum.ChatColor.Green)
+				sendMessageToPlayer(player, "Se quitaron $" .. amount .. " billetes", "Green")
 			end
-		else
-			warn("⚠️ No se encontró 'Billetes' en leaderstats para " .. player.Name)
 		end
-	else
-		warn("⚠️ No se encontró 'leaderstats' para " .. player.Name)
 	end
 end)
 
--- TRONCOS
 TroncosEvent.OnServerEvent:Connect(function(player, action, amount)
-	print("🎮 " .. player.Name .. " ejecutó comando de troncos: " .. action .. " - " .. amount)
-	
 	local leaderstats1 = player:FindFirstChild("leaderstats1")
 	if leaderstats1 then
 		local troncos = leaderstats1:FindFirstChild("Troncos")
 		if troncos then
 			if action == "add" then
 				troncos.Value = troncos.Value + amount
-				sendMessageToPlayer(player, "🪵 Se agregaron " .. amount .. " troncos", Enum.ChatColor.Green)
 			elseif action == "set" then
 				troncos.Value = amount
-				sendMessageToPlayer(player, "🪵 Troncos establecidos a " .. amount, Enum.ChatColor.Green)
 			elseif action == "remove" then
 				troncos.Value = math.max(0, troncos.Value - amount)
-				sendMessageToPlayer(player, "🪵 Se quitaron " .. amount .. " troncos", Enum.ChatColor.Green)
 			end
-		else
-			warn("⚠️ No se encontró 'Troncos' en leaderstats1 para " .. player.Name)
 		end
-	else
-		warn("⚠️ No se encontró 'leaderstats1' para " .. player.Name)
 	end
 end)
 
--- MENSAJES GLOBALES
-MessageEvent.OnServerEvent:Connect(function(player, message, allServers)
-	print("🎮 " .. player.Name .. " envió mensaje global: " .. message)
-	handleGlobalMessage(player, message, allServers)
-end)
+MessageEvent.OnServerEvent:Connect(handleGlobalMessage)
 
--- MULTI-SERVIDOR
 MultiServerEvent.OnServerEvent:Connect(function(player, eventType, action, data)
-	print("🎮 " .. player.Name .. " ejecutó evento multi-servidor: " .. eventType .. " - " .. action)
-	
 	publishToAllServersDataStore(eventType, action, data)
 
 	if eventType == "Humo" then
@@ -1011,49 +968,474 @@ MultiServerEvent.OnServerEvent:Connect(function(player, eventType, action, data)
 		end
 	end
 
-	broadcastMessage("🌐 Evento " .. eventType .. " " .. action .. " en TODOS los servidores", Enum.ChatColor.Green)
+	broadcastMessage("Evento " .. eventType .. " " .. action .. " en TODOS los servidores", "Green")
 end)
 
--- ============================================
--- VERIFICAR PASTO1 AL INICIAR
--- ============================================
+-- Verificar que pasto1 existe
 local function verificarPasto1()
 	local pasto1 = Workspace:FindFirstChild("pasto1")
 	if pasto1 then
 		print("✅ pasto1 encontrado en el Workspace")
 	else
-		warn("⚠️ pasto1 no encontrado en el Workspace - los eventos de humo y lluvia no funcionarán correctamente")
+		warn("⚠️  pasto1 no encontrado en el Workspace - los eventos de humo y lluvia no funcionarán correctamente")
 	end
 end
 
 verificarPasto1()
 
--- ============================================
--- MANEJAR NUEVOS JUGADORES
--- ============================================
-Players.PlayerAdded:Connect(function(player)
-	print("👤 Jugador conectado: " .. player.Name)
-	
-	-- Si la primera persona está activada, aplicarla al nuevo jugador
-	if primeraPersonaActivada then
-		player.CharacterAdded:Connect(function()
-			wait(1)
-			forzarPrimeraPersona(player)
+-- INTERFAZ DE USUARIO (CLIENTE)
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "AdminPanel"
+screenGui.Parent = playerGui
+screenGui.ResetOnSpawn = false
+screenGui.IgnoreGuiInset = true
+
+local mainFrame = Instance.new("Frame")
+mainFrame.Name = "MainFrame"
+mainFrame.Size = UDim2.new(0.25, 0, 0.45, 0)
+mainFrame.Position = UDim2.new(0.5, 0, 0.5, 0)
+mainFrame.AnchorPoint = Vector2.new(0.5, 0.5)
+mainFrame.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
+mainFrame.BorderSizePixel = 0
+mainFrame.ClipsDescendants = true
+mainFrame.Parent = screenGui
+
+local corner = Instance.new("UICorner")
+corner.CornerRadius = UDim.new(0, 8)
+corner.Parent = mainFrame
+
+local titleBar = Instance.new("Frame")
+titleBar.Name = "TitleBar"
+titleBar.Size = UDim2.new(1, 0, 0, 25)
+titleBar.Position = UDim2.new(0, 0, 0, 0)
+titleBar.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+titleBar.BorderSizePixel = 0
+titleBar.Parent = mainFrame
+
+local titleCorner = Instance.new("UICorner")
+titleCorner.CornerRadius = UDim.new(0, 8)
+titleCorner.Parent = titleBar
+
+local titleText = Instance.new("TextLabel")
+titleText.Name = "TitleText"
+titleText.Size = UDim2.new(1, -25, 1, 0)
+titleText.Position = UDim2.new(0, 8, 0, 0)
+titleText.BackgroundTransparency = 1
+titleText.Text = "PANEL UNIVERSAL - TODOS PUEDEN USAR"
+titleText.TextColor3 = Color3.fromRGB(255, 255, 255)
+titleText.TextXAlignment = Enum.TextXAlignment.Left
+titleText.Font = Enum.Font.GothamBold
+titleText.TextSize = 14
+titleText.Parent = titleBar
+
+local closeButton = Instance.new("TextButton")
+closeButton.Name = "CloseButton"
+closeButton.Size = UDim2.new(0, 25, 0, 25)
+closeButton.Position = UDim2.new(1, -25, 0, 0)
+closeButton.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
+closeButton.BorderSizePixel = 0
+closeButton.Text = "X"
+closeButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+closeButton.Font = Enum.Font.GothamBold
+closeButton.TextSize = 14
+closeButton.ZIndex = 2
+closeButton.Parent = titleBar
+
+local toggleButton = Instance.new("TextButton")
+toggleButton.Name = "ToggleButton"
+toggleButton.Size = UDim2.new(0, 50, 0, 50)
+toggleButton.Position = UDim2.new(0, 15, 0, 15)
+toggleButton.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+toggleButton.BorderSizePixel = 0
+toggleButton.Text = "Panel"
+toggleButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+toggleButton.Font = Enum.Font.GothamBold
+toggleButton.TextSize = 14
+toggleButton.Visible = true
+toggleButton.Parent = screenGui
+
+local toggleCorner = Instance.new("UICorner")
+toggleCorner.CornerRadius = UDim.new(0, 6)
+toggleCorner.Parent = toggleButton
+
+local scrollFrame = Instance.new("ScrollingFrame")
+scrollFrame.Name = "ScrollFrame"
+scrollFrame.Size = UDim2.new(1, 0, 1, -25)
+scrollFrame.Position = UDim2.new(0, 0, 0, 25)
+scrollFrame.BackgroundTransparency = 1
+scrollFrame.BorderSizePixel = 0
+scrollFrame.ScrollBarThickness = 6
+scrollFrame.ScrollBarImageColor3 = Color3.fromRGB(100, 100, 100)
+scrollFrame.CanvasSize = UDim2.new(0, 0, 0, 0)
+scrollFrame.Parent = mainFrame
+
+local uiListLayout = Instance.new("UIListLayout")
+uiListLayout.Name = "UIListLayout"
+uiListLayout.Padding = UDim.new(0, 8)
+uiListLayout.SortOrder = Enum.SortOrder.LayoutOrder
+uiListLayout.Parent = scrollFrame
+
+-- Función para crear secciones
+local function createSection(title, height, layoutOrder)
+	local section = Instance.new("Frame")
+	section.Name = title .. "Section"
+	section.Size = UDim2.new(0.96, 0, 0, height)
+	section.Position = UDim2.new(0.02, 0, 0, 0)
+	section.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+	section.BorderSizePixel = 0
+	section.LayoutOrder = layoutOrder
+	section.Parent = scrollFrame
+
+	local sectionCorner = Instance.new("UICorner")
+	sectionCorner.CornerRadius = UDim.new(0, 6)
+	sectionCorner.Parent = section
+
+	local sectionTitle = Instance.new("TextLabel")
+	sectionTitle.Name = "Title"
+	sectionTitle.Size = UDim2.new(1, 0, 0, 20)
+	sectionTitle.Position = UDim2.new(0, 0, 0, 0)
+	sectionTitle.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+	sectionTitle.BorderSizePixel = 0
+	sectionTitle.Text = "  " .. title
+	sectionTitle.TextColor3 = Color3.fromRGB(255, 255, 255)
+	sectionTitle.Font = Enum.Font.GothamBold
+	sectionTitle.TextSize = 12
+	sectionTitle.TextXAlignment = Enum.TextXAlignment.Left
+	sectionTitle.Parent = section
+
+	local titleCorner = Instance.new("UICorner")
+	titleCorner.CornerRadius = UDim.new(0, 6)
+	titleCorner.Parent = sectionTitle
+
+	return section
+end
+
+-- Función para crear botones
+local function createButton(parent, name, text, color, position, size)
+	local button = Instance.new("TextButton")
+	button.Name = name
+	button.Size = size or UDim2.new(0.45, -4, 0, 22)
+	button.Position = position
+	button.BackgroundColor3 = color
+	button.BorderSizePixel = 0
+	button.Text = text
+	button.TextColor3 = Color3.fromRGB(255, 255, 255)
+	button.Font = Enum.Font.GothamBold
+	button.TextSize = 11
+	button.Parent = parent
+
+	local buttonCorner = Instance.new("UICorner")
+	buttonCorner.CornerRadius = UDim.new(0, 4)
+	buttonCorner.Parent = button
+
+	return button
+end
+
+-- Función para crear campos de texto
+local function createTextBox(parent, name, placeholder, position, size)
+	local textBox = Instance.new("TextBox")
+	textBox.Name = name
+	textBox.Size = size or UDim2.new(0.55, -4, 0, 22)
+	textBox.Position = position
+	textBox.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+	textBox.BorderSizePixel = 0
+	textBox.PlaceholderText = placeholder
+	textBox.Text = ""
+	textBox.TextColor3 = Color3.fromRGB(0, 0, 0)
+	textBox.Font = Enum.Font.Gotham
+	textBox.TextSize = 11
+	textBox.Parent = parent
+
+	local textCorner = Instance.new("UICorner")
+	textCorner.CornerRadius = UDim.new(0, 4)
+	textCorner.Parent = textBox
+
+	return textBox
+end
+
+-- Crear todas las secciones del panel
+local moneySection = createSection("Billetes", 65, 1)
+local moneyInput = createTextBox(moneySection, "MoneyInput", "Cantidad", UDim2.new(0, 4, 0, 22))
+local moneyAddButton = createButton(moneySection, "MoneyAddButton", "+", Color3.fromRGB(60, 180, 60), UDim2.new(0.55, 2, 0, 22))
+local moneySetButton = createButton(moneySection, "MoneySetButton", "Set", Color3.fromRGB(60, 120, 180), UDim2.new(0.55, 2, 0, 44))
+
+local troncosSection = createSection("Troncos", 65, 2)
+local troncosInput = createTextBox(troncosSection, "TroncosInput", "Cantidad", UDim2.new(0, 4, 0, 22))
+local troncosAddButton = createButton(troncosSection, "TroncosAddButton", "+", Color3.fromRGB(200, 140, 60), UDim2.new(0.55, 2, 0, 22))
+local troncosRemoveButton = createButton(troncosSection, "TroncosRemoveButton", "-", Color3.fromRGB(180, 60, 60), UDim2.new(0.55, 2, 0, 44))
+local troncosSetButton = createButton(troncosSection, "TroncosSetButton", "Set", Color3.fromRGB(60, 120, 180), UDim2.new(0, 4, 0, 44))
+
+local speedSection = createSection("Velocidad", 45, 3)
+local speedInput = createTextBox(speedSection, "SpeedInput", "Velocidad", UDim2.new(0, 4, 0, 22))
+local speedSetButton = createButton(speedSection, "SpeedSetButton", "Aplicar", Color3.fromRGB(60, 120, 180), UDim2.new(0.55, 2, 0, 22))
+
+local flySection = createSection("Vuelo", 45, 4)
+local flyEnableButton = createButton(flySection, "FlyEnableButton", "Activar", Color3.fromRGB(60, 180, 60), UDim2.new(0, 4, 0, 22))
+local flyDisableButton = createButton(flySection, "FlyDisableButton", "Desactivar", Color3.fromRGB(180, 60, 60), UDim2.new(0.5, 2, 0, 22))
+
+local meteorSection = createSection("Meteoritos", 85, 5)
+local meteorTimeInput = createTextBox(meteorSection, "MeteorTimeInput", "Segundos", UDim2.new(0, 4, 0, 22))
+meteorTimeInput.Text = "240"
+local meteorStartButton = createButton(meteorSection, "MeteorStartButton", "Iniciar", Color3.fromRGB(60, 180, 60), UDim2.new(0.55, 2, 0, 22))
+local meteorStopButton = createButton(meteorSection, "MeteorStopButton", "Detener", Color3.fromRGB(180, 60, 60), UDim2.new(0.55, 2, 0, 44))
+local meteorMultiButton = createButton(meteorSection, "MeteorMultiButton", "Todos Serv", Color3.fromRGB(120, 80, 200), UDim2.new(0, 4, 0, 44))
+local meteorMultiStopButton = createButton(meteorSection, "MeteorMultiStopButton", "Parar Todos", Color3.fromRGB(180, 60, 60), UDim2.new(0.55, 2, 0, 66))
+
+local audioSection = createSection("Audio", 85, 6)
+local audioInput = createTextBox(audioSection, "AudioInput", "ID Audio", UDim2.new(0, 4, 0, 22))
+audioInput.Text = "74456998941899"
+local audioPlayButton = createButton(audioSection, "AudioPlayButton", "Play", Color3.fromRGB(60, 180, 60), UDim2.new(0.55, 2, 0, 22))
+local audioStopButton = createButton(audioSection, "AudioStopButton", "Stop", Color3.fromRGB(180, 60, 60), UDim2.new(0.55, 2, 0, 44))
+local audioMultiButton = createButton(audioSection, "AudioMultiButton", "Todos Serv", Color3.fromRGB(120, 80, 200), UDim2.new(0, 4, 0, 44))
+local audioMultiStopButton = createButton(audioSection, "AudioMultiStopButton", "Parar Todos", Color3.fromRGB(180, 60, 60), UDim2.new(0.55, 2, 0, 66))
+
+local humoSection = createSection("Sistema de Humo", 85, 7)
+local humoTimeInput = createTextBox(humoSection, "HumoTimeInput", "Minutos", UDim2.new(0, 4, 0, 22))
+humoTimeInput.Text = "5"
+local humoStartButton = createButton(humoSection, "HumoStartButton", "Activar", Color3.fromRGB(60, 180, 60), UDim2.new(0.55, 2, 0, 22))
+local humoStopButton = createButton(humoSection, "HumoStopButton", "Desactivar", Color3.fromRGB(180, 60, 60), UDim2.new(0.55, 2, 0, 44))
+local humoMultiButton = createButton(humoSection, "HumoMultiButton", "Todos Serv", Color3.fromRGB(120, 80, 200), UDim2.new(0, 4, 0, 44))
+local humoMultiStopButton = createButton(humoSection, "HumoMultiStopButton", "Parar Todos", Color3.fromRGB(180, 60, 60), UDim2.new(0.55, 2, 0, 66))
+
+local lluviaSection = createSection("Lluvia", 65, 8)
+local lluviaStartButton = createButton(lluviaSection, "LluviaStartButton", "Activar", Color3.fromRGB(60, 180, 60), UDim2.new(0, 4, 0, 22))
+local lluviaStopButton = createButton(lluviaSection, "LluviaStopButton", "Desactivar", Color3.fromRGB(180, 60, 60), UDim2.new(0.5, 2, 0, 22))
+local lluviaMultiButton = createButton(lluviaSection, "LluviaMultiButton", "Todos Serv", Color3.fromRGB(120, 80, 200), UDim2.new(0, 4, 0, 44))
+local lluviaMultiStopButton = createButton(lluviaSection, "LluviaMultiStopButton", "Parar Todos", Color3.fromRGB(180, 60, 60), UDim2.new(0.5, 2, 0, 44))
+
+local messageSection = createSection("Mensajes Globales", 85, 9)
+local messageInput = createTextBox(messageSection, "MessageInput", "Escribe tu mensaje aquí", UDim2.new(0, 4, 0, 22))
+messageInput.Size = UDim2.new(0.96, -8, 0, 22)
+
+local messageSendButton = createButton(messageSection, "MessageSendButton", "Enviar a este Servidor", Color3.fromRGB(60, 120, 180), UDim2.new(0, 4, 0, 44))
+messageSendButton.Size = UDim2.new(0.48, -4, 0, 22)
+
+local messageSendAllButton = createButton(messageSection, "MessageSendAllButton", "Enviar a Todos los Servidores", Color3.fromRGB(120, 80, 200), UDim2.new(0.5, 2, 0, 44))
+messageSendAllButton.Size = UDim2.new(0.48, -4, 0, 22)
+
+-- Ajustar tamaño del canvas
+uiListLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+	scrollFrame.CanvasSize = UDim2.new(0, 0, 0, uiListLayout.AbsoluteContentSize.Y + 10)
+end)
+
+-- Funcionalidad de arrastre
+local dragging
+local dragInput
+local dragStart
+local startPos
+
+local function update(input)
+	local delta = input.Position - dragStart
+	mainFrame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+end
+
+titleBar.InputBegan:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+		dragging = true
+		dragStart = input.Position
+		startPos = mainFrame.Position
+
+		input.Changed:Connect(function()
+			if input.UserInputState == Enum.UserInputState.End then
+				dragging = false
+			end
 		end)
 	end
 end)
 
--- ============================================
--- MENSAJES DE CONFIRMACIÓN
--- ============================================
-print("✅ ========================================")
-print("✅ SISTEMA DE ADMINISTRACIÓN CARGADO")
-print("✅ ========================================")
-print("🔥 Sistema de humo: Modelos en pasto1")
-print("🌧️ Sistema de lluvia: Partículas en pasto1")
-print("📷 Sistema de cámara en primera persona")
-print("🎵 Sistema de música mejorado")
-print("🌐 Sistema de eventos multi-servidor activado")
+titleBar.InputChanged:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+		dragInput = input
+	end
+end)
+
+UserInputService.InputChanged:Connect(function(input)
+	if input == dragInput and dragging then
+		update(input)
+	end
+end)
+
+-- Funcionalidad de los botones
+closeButton.MouseButton1Click:Connect(function()
+	mainFrame.Visible = false
+	toggleButton.Visible = true
+end)
+
+toggleButton.MouseButton1Click:Connect(function()
+	mainFrame.Visible = true
+	toggleButton.Visible = false
+end)
+
+-- Conexiones de los botones con los eventos
+moneyAddButton.MouseButton1Click:Connect(function()
+	local amount = tonumber(moneyInput.Text)
+	if amount then
+		MoneyEvent:FireServer("add", amount)
+		moneyInput.Text = ""
+	end
+end)
+
+moneySetButton.MouseButton1Click:Connect(function()
+	local amount = tonumber(moneyInput.Text)
+	if amount then
+		MoneyEvent:FireServer("set", amount)
+		moneyInput.Text = ""
+	end
+end)
+
+troncosAddButton.MouseButton1Click:Connect(function()
+	local amount = tonumber(troncosInput.Text)
+	if amount then
+		TroncosEvent:FireServer("add", amount)
+		troncosInput.Text = ""
+	end
+end)
+
+troncosRemoveButton.MouseButton1Click:Connect(function()
+	local amount = tonumber(troncosInput.Text)
+	if amount then
+		TroncosEvent:FireServer("remove", amount)
+		troncosInput.Text = ""
+	end
+end)
+
+troncosSetButton.MouseButton1Click:Connect(function()
+	local amount = tonumber(troncosInput.Text)
+	if amount then
+		TroncosEvent:FireServer("set", amount)
+		troncosInput.Text = ""
+	end
+end)
+
+speedSetButton.MouseButton1Click:Connect(function()
+	local speed = tonumber(speedInput.Text)
+	if speed then
+		SpeedEvent:FireServer(speed)
+		speedInput.Text = ""
+	end
+end)
+
+flyEnableButton.MouseButton1Click:Connect(function()
+	FlyEvent:FireServer("enable")
+end)
+
+flyDisableButton.MouseButton1Click:Connect(function()
+	FlyEvent:FireServer("disable")
+end)
+
+meteorStartButton.MouseButton1Click:Connect(function()
+	local duration = tonumber(meteorTimeInput.Text) or 240
+	MeteorEvent:FireServer("start", duration)
+end)
+
+meteorStopButton.MouseButton1Click:Connect(function()
+	MeteorEvent:FireServer("stop")
+end)
+
+audioPlayButton.MouseButton1Click:Connect(function()
+	local audioId = audioInput.Text
+	if audioId and audioId ~= "" then
+		AudioEvent:FireServer("play", audioId)
+	end
+end)
+
+audioStopButton.MouseButton1Click:Connect(function()
+	AudioEvent:FireServer("stop")
+end)
+
+humoStartButton.MouseButton1Click:Connect(function()
+	local minutos = tonumber(humoTimeInput.Text)
+	if minutos and minutos > 0 then
+		HumoEvent:FireServer("start", minutos)
+		humoTimeInput.Text = ""
+	end
+end)
+
+humoStopButton.MouseButton1Click:Connect(function()
+	HumoEvent:FireServer("stop")
+end)
+
+lluviaStartButton.MouseButton1Click:Connect(function()
+	LluviaEvent:FireServer("start")
+end)
+
+lluviaStopButton.MouseButton1Click:Connect(function()
+	LluviaEvent:FireServer("stop")
+end)
+
+-- Eventos multi-servidor
+meteorMultiButton.MouseButton1Click:Connect(function()
+	local duration = tonumber(meteorTimeInput.Text) or 240
+	MultiServerEvent:FireServer("Meteoros", "start", {Duration = duration})
+end)
+
+meteorMultiStopButton.MouseButton1Click:Connect(function()
+	MultiServerEvent:FireServer("Meteoros", "stop", {})
+end)
+
+audioMultiButton.MouseButton1Click:Connect(function()
+	local audioId = audioInput.Text
+	if audioId and audioId ~= "" then
+		MultiServerEvent:FireServer("Musica", "play", {AudioId = audioId})
+	end
+end)
+
+audioMultiStopButton.MouseButton1Click:Connect(function()
+	MultiServerEvent:FireServer("Musica", "stop", {})
+end)
+
+humoMultiButton.MouseButton1Click:Connect(function()
+	local minutos = tonumber(humoTimeInput.Text) or 5
+	MultiServerEvent:FireServer("Humo", "start", {Duration = minutos})
+end)
+
+humoMultiStopButton.MouseButton1Click:Connect(function()
+	MultiServerEvent:FireServer("Humo", "stop", {})
+end)
+
+lluviaMultiButton.MouseButton1Click:Connect(function()
+	MultiServerEvent:FireServer("Lluvia", "start", {})
+end)
+
+lluviaMultiStopButton.MouseButton1Click:Connect(function()
+	MultiServerEvent:FireServer("Lluvia", "stop", {})
+end)
+
+messageSendButton.MouseButton1Click:Connect(function()
+	local message = messageInput.Text
+	if message and message ~= "" then
+		MessageEvent:FireServer(message, false)
+		messageInput.Text = ""
+	end
+end)
+
+messageSendAllButton.MouseButton1Click:Connect(function()
+	local message = messageInput.Text
+	if message and message ~= "" then
+		MessageEvent:FireServer(message, true)
+		messageInput.Text = ""
+	end
+end)
+
+-- Inicialmente ocultar el panel principal
+mainFrame.Visible = false
+toggleButton.Visible = true
+
+-- Atajo de teclado para abrir/cerrar el panel (F3)
+local inputConnection
+inputConnection = UserInputService.InputBegan:Connect(function(input, processed)
+	if not processed and input.KeyCode == Enum.KeyCode.F3 then
+		mainFrame.Visible = not mainFrame.Visible
+		toggleButton.Visible = not mainFrame.Visible
+	end
+end)
+
+print("✅ SISTEMA DE PANEL UNIVERSAL CARGADO - TODOS LOS JUGADORES PUEDEN USARLO")
+print("🔥 Sistema de humo activado")
+print("🌧️ Sistema de lluvia activado")
+print("☄️ Sistema de meteoritos activado")
+print("🎵 Sistema de audio activado")
+print("🌐 Sistema multi-servidor activado")
 print("💬 Sistema de mensajes globales activado")
-print("⚠️ MODO SIN RESTRICCIONES: Todos pueden usar el panel")
-print("✅ ========================================")
+print("📱 Panel accesible para todos los jugadores")
+print("🎮 Presiona F3 para abrir/cerrar el panel")
