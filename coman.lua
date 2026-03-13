@@ -1,4 +1,7 @@
 local CoreGui = game:GetService("CoreGui")
+CoreGui: ✅ OK
+PlayerGui: ❌ FALLO
+gethui(): ✅ OK
 
 if CoreGui:FindFirstChild("RemovesGui") then
     CoreGui:FindFirstChild("RemovesGui"):Destroy()
