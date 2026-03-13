@@ -1,4 +1,3 @@
--- Auto-detect parent GUI
 local parentGui
 local methods = {
     function() return gethui() end,
@@ -13,12 +12,8 @@ for _, method in ipairs(methods) do
     end
 end
 
-if not parentGui then
-    warn("❌ No se pudo encontrar un parent para la GUI")
-    return
-end
+if not parentGui then return end
 
--- Limpiar GUI anterior
 local old = parentGui:FindFirstChild("RemovesGui")
 if old then old:Destroy() end
 
@@ -29,7 +24,7 @@ screenGui.DisplayOrder = 999
 pcall(function() screenGui.IgnoreGuiInset = true end)
 screenGui.Parent = parentGui
 
-print("✅ GUI montada en: " .. parentGui.Name)
+print("GUI montada en: " .. parentGui.Name)
 
 local categorias = {
     { nombre = "ReplicatedStorage",    ref = game:GetService("ReplicatedStorage") },
@@ -44,10 +39,6 @@ local categorias = {
 local modoActual = "remotes"
 local cacheRemotes = {}
 local cacheScripts = {}
-
--- ═══════════════════════════════
--- BOTONES SUPERIORES
--- ═══════════════════════════════
 
 local function crearBoton(texto, posX, ancho, color)
     local btn = Instance.new("TextButton")
@@ -67,14 +58,10 @@ local function crearBoton(texto, posX, ancho, color)
     return btn
 end
 
-local btnRemotes  = crearBoton("📡 Remotes",  -215, 120, Color3.fromRGB(30, 100, 220))
-local btnScripts  = crearBoton("📜 Scripts",   -85, 120, Color3.fromRGB(40, 40, 60))
-local btnBytecode = crearBoton("🔬 Bytecode",   45, 120, Color3.fromRGB(40, 40, 60))
-local btnCopiar   = crearBoton("📋 Copiar",    175, 100, Color3.fromRGB(20, 100, 80))
-
--- ═══════════════════════════════
--- PANEL PRINCIPAL
--- ═══════════════════════════════
+local btnRemotes  = crearBoton("REMOTES",  -215, 120, Color3.fromRGB(30, 100, 220))
+local btnScripts  = crearBoton("SCRIPTS",   -85, 120, Color3.fromRGB(40, 40, 60))
+local btnBytecode = crearBoton("BYTECODE",   45, 120, Color3.fromRGB(40, 40, 60))
+local btnCopiar   = crearBoton("COPIAR",    175, 100, Color3.fromRGB(20, 100, 80))
 
 local panel = Instance.new("ScrollingFrame")
 panel.Size = UDim2.new(0, 440, 0, 420)
@@ -102,7 +89,6 @@ paddingPanel.PaddingRight = UDim.new(0, 14)
 paddingPanel.PaddingBottom = UDim.new(0, 10)
 paddingPanel.Parent = panel
 
--- Toast
 local toast = Instance.new("TextLabel")
 toast.Size = UDim2.new(0, 300, 0, 36)
 toast.Position = UDim2.new(0.5, -150, 1, -70)
@@ -125,10 +111,6 @@ local function mostrarToast(texto, color)
     toast.Visible = true
     task.delay(2.5, function() toast.Visible = false end)
 end
-
--- ═══════════════════════════════
--- UI HELPERS
--- ═══════════════════════════════
 
 local function limpiarPanel()
     for _, child in ipairs(panel:GetChildren()) do
@@ -153,7 +135,7 @@ local function addHeader(texto, total, color)
     label.Position = UDim2.new(0, 8, 0, 0)
     label.BackgroundTransparency = 1
     label.TextColor3 = Color3.fromRGB(210, 225, 255)
-    label.Text = "📁 " .. texto .. "   ✅ Total: " .. total
+    label.Text = "[" .. texto .. "] Total: " .. total
     label.Font = Enum.Font.GothamBold
     label.TextSize = 13
     label.TextXAlignment = Enum.TextXAlignment.Left
@@ -193,7 +175,7 @@ local function addRemoteRow(index, nombre, tipo, ruta)
     lblNombre.TextColor3 = tipo == "RemoteEvent"
         and Color3.fromRGB(100, 255, 160)
         or Color3.fromRGB(255, 185, 70)
-    lblNombre.Text = string.format("[%d] %s  (%s)", index, nombre, tipo)
+    lblNombre.Text = string.format("[%d] %s (%s)", index, nombre, tipo)
     lblNombre.Font = Enum.Font.GothamBold
     lblNombre.TextSize = 12
     lblNombre.TextXAlignment = Enum.TextXAlignment.Left
@@ -206,7 +188,7 @@ local function addRemoteRow(index, nombre, tipo, ruta)
     lblRuta.Position = UDim2.new(0, 8, 0, 24)
     lblRuta.BackgroundTransparency = 1
     lblRuta.TextColor3 = Color3.fromRGB(140, 150, 200)
-    lblRuta.Text = "📁 " .. ruta
+    lblRuta.Text = ruta
     lblRuta.Font = Enum.Font.Gotham
     lblRuta.TextSize = 11
     lblRuta.TextXAlignment = Enum.TextXAlignment.Left
@@ -235,7 +217,7 @@ local function addScriptRow(index, nombre, tipo, ruta, enabled, scriptRef)
     lblNombre.Position = UDim2.new(0, 8, 0, 3)
     lblNombre.BackgroundTransparency = 1
     lblNombre.TextColor3 = colorTipo
-    lblNombre.Text = string.format("[%d] %s  (%s) %s", index, nombre, tipo, enabled and "🟢" or "🔴")
+    lblNombre.Text = string.format("[%d] %s (%s) %s", index, nombre, tipo, enabled and "ON" or "OFF")
     lblNombre.Font = Enum.Font.GothamBold
     lblNombre.TextSize = 12
     lblNombre.TextXAlignment = Enum.TextXAlignment.Left
@@ -248,7 +230,7 @@ local function addScriptRow(index, nombre, tipo, ruta, enabled, scriptRef)
     lblRuta.Position = UDim2.new(0, 8, 0, 24)
     lblRuta.BackgroundTransparency = 1
     lblRuta.TextColor3 = Color3.fromRGB(140, 150, 200)
-    lblRuta.Text = "📁 " .. ruta
+    lblRuta.Text = ruta
     lblRuta.Font = Enum.Font.Gotham
     lblRuta.TextSize = 11
     lblRuta.TextXAlignment = Enum.TextXAlignment.Left
@@ -257,11 +239,11 @@ local function addScriptRow(index, nombre, tipo, ruta, enabled, scriptRef)
     lblRuta.Parent = frame
 
     local btnByte = Instance.new("TextButton")
-    btnByte.Size = UDim2.new(0, 88, 0, 18)
-    btnByte.Position = UDim2.new(1, -96, 0, 24)
+    btnByte.Size = UDim2.new(0, 80, 0, 18)
+    btnByte.Position = UDim2.new(1, -88, 0, 24)
     btnByte.BackgroundColor3 = Color3.fromRGB(60, 30, 100)
     btnByte.TextColor3 = Color3.fromRGB(200, 160, 255)
-    btnByte.Text = "🔬 bytecode"
+    btnByte.Text = "BYTECODE"
     btnByte.Font = Enum.Font.Gotham
     btnByte.TextSize = 10
     btnByte.BorderSizePixel = 0
@@ -273,15 +255,12 @@ local function addScriptRow(index, nombre, tipo, ruta, enabled, scriptRef)
 
     btnByte.MouseButton1Click:Connect(function()
         limpiarPanel()
-        addLine("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━", Color3.fromRGB(80, 40, 150))
-        addLine("🔬 BYTECODE: " .. nombre, Color3.fromRGB(200, 160, 255))
-        addLine("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━", Color3.fromRGB(80, 40, 150))
+        addLine("BYTECODE: " .. nombre, Color3.fromRGB(200, 160, 255))
 
         local rawContent = ""
-
         local okD, src = pcall(function() return decompile(scriptRef) end)
         if okD and src and #src > 0 then
-            addLine("✅ Decompilado:", Color3.fromRGB(100, 255, 160))
+            addLine("Decompilado OK:", Color3.fromRGB(100, 255, 160))
             rawContent = src
             for line in src:gmatch("[^\n]+") do
                 addLine(line, Color3.fromRGB(220, 220, 220))
@@ -289,7 +268,7 @@ local function addScriptRow(index, nombre, tipo, ruta, enabled, scriptRef)
         else
             local okB, bytecode = pcall(function() return getscriptbytecode(scriptRef) end)
             if okB and bytecode and #bytecode > 0 then
-                addLine("⚠️ Solo bytecode (" .. #bytecode .. " bytes):", Color3.fromRGB(255, 200, 60))
+                addLine("Solo bytecode (" .. #bytecode .. " bytes):", Color3.fromRGB(255, 200, 60))
                 rawContent = bytecode
                 local preview = ""
                 for i = 1, math.min(200, #bytecode) do
@@ -300,9 +279,9 @@ local function addScriptRow(index, nombre, tipo, ruta, enabled, scriptRef)
                     end
                 end
                 if #preview > 0 then addLine(preview, Color3.fromRGB(160, 200, 160)) end
-                addLine("... (truncado a 200 bytes)", Color3.fromRGB(120, 120, 160))
+                addLine("(truncado a 200 bytes)", Color3.fromRGB(120, 120, 160))
             else
-                addLine("❌ No disponible en Delta", Color3.fromRGB(255, 100, 100))
+                addLine("No disponible en este executor", Color3.fromRGB(255, 100, 100))
             end
         end
 
@@ -311,7 +290,7 @@ local function addScriptRow(index, nombre, tipo, ruta, enabled, scriptRef)
             btnCopyByte.Size = UDim2.new(1, 0, 0, 30)
             btnCopyByte.BackgroundColor3 = Color3.fromRGB(20, 100, 80)
             btnCopyByte.TextColor3 = Color3.new(1, 1, 1)
-            btnCopyByte.Text = "📋 Copiar contenido"
+            btnCopyByte.Text = "COPIAR CONTENIDO"
             btnCopyByte.Font = Enum.Font.GothamBold
             btnCopyByte.TextSize = 12
             btnCopyByte.BorderSizePixel = 0
@@ -322,7 +301,7 @@ local function addScriptRow(index, nombre, tipo, ruta, enabled, scriptRef)
             cc.Parent = btnCopyByte
             btnCopyByte.MouseButton1Click:Connect(function()
                 local ok = pcall(function() setclipboard(rawContent) end)
-                mostrarToast(ok and "✅ Copiado!" or "❌ Delta no soporta clipboard", ok and Color3.fromRGB(20,120,80) or Color3.fromRGB(150,30,30))
+                mostrarToast(ok and "Copiado!" or "Delta no soporta clipboard", ok and Color3.fromRGB(20,120,80) or Color3.fromRGB(150,30,30))
             end)
         end
 
@@ -330,7 +309,7 @@ local function addScriptRow(index, nombre, tipo, ruta, enabled, scriptRef)
         btnVolver.Size = UDim2.new(1, 0, 0, 30)
         btnVolver.BackgroundColor3 = Color3.fromRGB(40, 40, 70)
         btnVolver.TextColor3 = Color3.new(1, 1, 1)
-        btnVolver.Text = "⬅️ Volver a Scripts"
+        btnVolver.Text = "< VOLVER A SCRIPTS"
         btnVolver.Font = Enum.Font.GothamBold
         btnVolver.TextSize = 12
         btnVolver.BorderSizePixel = 0
@@ -347,10 +326,6 @@ local function addScriptRow(index, nombre, tipo, ruta, enabled, scriptRef)
         panel.CanvasSize = UDim2.new(0, 0, 0, layout.AbsoluteContentSize.Y + 20)
     end)
 end
-
--- ═══════════════════════════════
--- BÚSQUEDAS
--- ═══════════════════════════════
 
 local function buscarRemotes(parent, ruta, lista)
     for _, obj in ipairs(parent:GetChildren()) do
@@ -377,10 +352,6 @@ local function buscarScripts(parent, ruta, lista)
     end
 end
 
--- ═══════════════════════════════
--- RENDERS
--- ═══════════════════════════════
-
 function renderRemotes()
     limpiarPanel()
     cacheRemotes = {}
@@ -393,7 +364,7 @@ function renderRemotes()
             for _, r in ipairs(lista) do table.insert(cacheRemotes, r) end
             addHeader(cat.nombre, #lista, Color3.fromRGB(25, 50, 120))
             if #lista == 0 then
-                addLine("   ⚠️ Sin remotes", Color3.fromRGB(160, 160, 100))
+                addLine("  Sin remotes", Color3.fromRGB(160, 160, 100))
             else
                 for i, r in ipairs(lista) do
                     addRemoteRow(i, r.nombre, r.tipo, r.ruta)
@@ -401,8 +372,7 @@ function renderRemotes()
             end
         end
     end
-    addLine("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━", Color3.fromRGB(30, 100, 220))
-    addLine("  📡 TOTAL: " .. totalGlobal .. " remotes", Color3.fromRGB(100, 200, 255))
+    addLine("TOTAL: " .. totalGlobal .. " remotes", Color3.fromRGB(100, 200, 255))
     panel.CanvasSize = UDim2.new(0, 0, 0, layout.AbsoluteContentSize.Y + 20)
 end
 
@@ -418,7 +388,7 @@ function renderScripts()
             for _, s in ipairs(lista) do table.insert(cacheScripts, s) end
             addHeader(cat.nombre, #lista, Color3.fromRGB(45, 20, 80))
             if #lista == 0 then
-                addLine("   ⚠️ Sin scripts", Color3.fromRGB(160, 160, 100))
+                addLine("  Sin scripts", Color3.fromRGB(160, 160, 100))
             else
                 for i, s in ipairs(lista) do
                     addScriptRow(i, s.nombre, s.tipo, s.ruta, s.enabled, s.ref)
@@ -426,19 +396,14 @@ function renderScripts()
             end
         end
     end
-    addLine("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━", Color3.fromRGB(120, 50, 200))
-    addLine("  📜 TOTAL: " .. totalGlobal .. " scripts", Color3.fromRGB(200, 150, 255))
+    addLine("TOTAL: " .. totalGlobal .. " scripts", Color3.fromRGB(200, 150, 255))
     panel.CanvasSize = UDim2.new(0, 0, 0, layout.AbsoluteContentSize.Y + 20)
 end
-
--- ═══════════════════════════════
--- BOTÓN COPIAR TODO
--- ═══════════════════════════════
 
 btnCopiar.MouseButton1Click:Connect(function()
     local lines = {}
     if modoActual == "remotes" then
-        table.insert(lines, "=== REMOTES - " .. game.Name .. " ===")
+        table.insert(lines, "REMOTES - " .. game.Name)
         table.insert(lines, "PlaceId: " .. game.PlaceId)
         table.insert(lines, "Total: " .. #cacheRemotes)
         table.insert(lines, "")
@@ -452,7 +417,7 @@ btnCopiar.MouseButton1Click:Connect(function()
             table.insert(lines, string.format("[%s] %s", r.tipo, r.ruta))
         end
     elseif modoActual == "scripts" then
-        table.insert(lines, "=== SCRIPTS - " .. game.Name .. " ===")
+        table.insert(lines, "SCRIPTS - " .. game.Name)
         table.insert(lines, "PlaceId: " .. game.PlaceId)
         table.insert(lines, "Total: " .. #cacheScripts)
         table.insert(lines, "")
@@ -466,26 +431,21 @@ btnCopiar.MouseButton1Click:Connect(function()
             table.insert(lines, string.format("[%s] %s %s", s.tipo, s.ruta, s.enabled and "(ON)" or "(OFF)"))
         end
     else
-        mostrarToast("⚠️ Abre Remotes o Scripts primero", Color3.fromRGB(140, 100, 20))
+        mostrarToast("Abre Remotes o Scripts primero", Color3.fromRGB(140, 100, 20))
         return
     end
 
     local texto = table.concat(lines, "\n")
     if #texto == 0 then
-        mostrarToast("⚠️ Nada que copiar", Color3.fromRGB(140, 100, 20))
+        mostrarToast("Nada que copiar", Color3.fromRGB(140, 100, 20))
         return
     end
-
     local ok = pcall(function() setclipboard(texto) end)
     mostrarToast(
-        ok and "✅ Copiado! Pega en Notas o WhatsApp" or "❌ Delta no soporta clipboard",
+        ok and "Copiado! Pega en Notas o WhatsApp" or "Delta no soporta clipboard",
         ok and Color3.fromRGB(20, 120, 80) or Color3.fromRGB(150, 30, 30)
     )
 end)
-
--- ═══════════════════════════════
--- EVENTOS BOTONES
--- ═══════════════════════════════
 
 local function actualizarBotones()
     btnRemotes.BackgroundColor3  = modoActual == "remotes"  and Color3.fromRGB(30, 100, 220) or Color3.fromRGB(40, 40, 60)
@@ -515,12 +475,10 @@ btnBytecode.MouseButton1Click:Connect(function()
     modoActual = "bytecode"
     actualizarBotones()
     limpiarPanel()
-    addLine("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━", Color3.fromRGB(80, 40, 150))
-    addLine("🔬 Ve a 📜 Scripts y pulsa 🔬", Color3.fromRGB(200, 160, 255))
-    addLine("   en el script que quieras ver", Color3.fromRGB(160, 140, 200))
-    addLine("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━", Color3.fromRGB(80, 40, 150))
+    addLine("Ve a SCRIPTS y pulsa BYTECODE", Color3.fromRGB(200, 160, 255))
+    addLine("en el script que quieras ver", Color3.fromRGB(160, 140, 200))
     panel.CanvasSize = UDim2.new(0, 0, 0, layout.AbsoluteContentSize.Y + 20)
     panel.Visible = true
 end)
 
-print("✅ RemotesGui v4 cargado en " .. parentGui.Name)
+print("RemotesGui v4 cargado en " .. parentGui.Name)
