@@ -1,16 +1,38 @@
 local Players = game:GetService("Players")
-local CoreGui = game:GetService("CoreGui")
-local player = Players.LocalPlayer
+local player = Players.LocalPlayer or game:GetService("Players").LocalPlayer
 
--- Eliminar GUI anterior si ya existe
-if CoreGui:FindFirstChild("RemovesGui") then
-    CoreGui:FindFirstChild("RemovesGui"):Destroy()
+-- Esperar al player si aún no cargó
+if not player then
+    Players.PlayerAdded:Wait()
+    player = Players.LocalPlayer
 end
+
+-- Intentar con CoreGui, si falla usar PlayerGui
+local parentGui
+local success = pcall(function()
+    parentGui = game:GetService("CoreGui")
+end)
+if not success then
+    parentGui = player:WaitForChild("PlayerGui")
+end
+
+-- Eliminar GUI anterior
+local old = parentGui:FindFirstChild("RemovesGui")
+if old then old:Destroy() end
 
 local screenGui = Instance.new("ScreenGui")
 screenGui.Name = "RemovesGui"
 screenGui.ResetOnSpawn = false
-screenGui.Parent = CoreGui
+
+-- Algunos executors necesitan esto
+pcall(function()
+    screenGui.DisplayOrder = 999
+end)
+
+screenGui.Parent = parentGui
+
+-- Debug: verificar que se creó
+print("✅ GUI creada en: " .. parentGui.Name)
 
 local button = Instance.new("TextButton")
 button.Name = "ListarRemoves"
@@ -22,6 +44,7 @@ button.Text = "🔍 Ver Removes del Juego"
 button.Font = Enum.Font.GothamBold
 button.TextSize = 16
 button.BorderSizePixel = 0
+button.ZIndex = 10
 button.Parent = screenGui
 
 local uiCornerBtn = Instance.new("UICorner")
@@ -36,6 +59,7 @@ panel.BackgroundColor3 = Color3.fromRGB(15, 20, 40)
 panel.BorderSizePixel = 0
 panel.ScrollBarThickness = 6
 panel.Visible = false
+panel.ZIndex = 10
 panel.Parent = screenGui
 
 local uiCornerPanel = Instance.new("UICorner")
@@ -61,12 +85,14 @@ local function addLabel(text, color)
     label.Font = Enum.Font.Gotham
     label.TextSize = 13
     label.TextXAlignment = Enum.TextXAlignment.Left
+    label.ZIndex = 11
     label.Parent = panel
 end
 
 local panelAbierto = false
 
 button.MouseButton1Click:Connect(function()
+    print("🖱️ Botón clickeado") -- debug
     if panelAbierto then
         panel.Visible = false
         button.Text = "🔍 Ver Removes del Juego"
@@ -100,6 +126,8 @@ button.MouseButton1Click:Connect(function()
         panelAbierto = true
 
         local total = #removes
+        print("📡 Remotes encontrados: " .. total) -- debug
+
         addLabel("━━━━━━━━━━━━━━━━━━━━━━━━━━━", Color3.fromRGB(30, 100, 220))
         addLabel("  📡 TOTAL DE REMOTES: " .. total, Color3.fromRGB(100, 200, 255))
         addLabel("━━━━━━━━━━━━━━━━━━━━━━━━━━━", Color3.fromRGB(30, 100, 220))
@@ -111,7 +139,6 @@ button.MouseButton1Click:Connect(function()
                 local color = r.tipo == "RemoteEvent"
                     and Color3.fromRGB(100, 255, 150)
                     or Color3.fromRGB(255, 180, 80)
-
                 addLabel(string.format("  [%d] %s (%s)", i, r.nombre, r.tipo), color)
                 addLabel("       📁 " .. r.ruta, Color3.fromRGB(160, 160, 200))
             end
@@ -122,3 +149,5 @@ button.MouseButton1Click:Connect(function()
         button.BackgroundColor3 = Color3.fromRGB(180, 30, 30)
     end
 end)
+
+print("✅ Script cargado correctamente")
