@@ -1,300 +1,280 @@
--- SuperPoderes LocalScript
--- Coloca este script en StarterPlayer > StarterPlayerScripts
--- Controles:
---   F        → Activar/Desactivar vuelo
---   Q/E      → Subir / Bajar mientras vuelas
---   G        → Activar/Desactivar super velocidad
---   Clic     → Golpe explosivo (manda a volar a los jugadores cercanos)
+-- SuperPoderes GUI LocalScript
+-- Coloca en: StarterPlayer > StarterPlayerScripts
+-- Tiene botones en pantalla que puedes tocar/clickear
 
-local Players        = game:GetService("Players")
-local RunService     = game:GetService("RunService")
-local UserInputService = game:GetService("UserInputService")
-local TweenService   = game:GetService("TweenService")
+local Players           = game:GetService("Players")
+local RunService        = game:GetService("RunService")
+local UserInputService  = game:GetService("UserInputService")
+local TweenService      = game:GetService("TweenService")
 
 local player  = Players.LocalPlayer
 local camera  = workspace.CurrentCamera
 
--- ─── Configuración ─────────────────────────────────────────────
-local FLIGHT_SPEED     = 60      -- velocidad de vuelo
-local WALK_SPEED       = 50      -- velocidad al correr (normal ~16)
-local HIT_RADIUS       = 15      -- radio del golpe explosivo (studs)
-local HIT_FORCE        = 180     -- fuerza del lanzamiento
-local HIT_COOLDOWN     = 0.8     -- segundos entre golpes
+-- ─── CONFIG ────────────────────────────────────────────────────
+local FLIGHT_SPEED  = 80
+local WALK_SPEED    = 60
+local HIT_RADIUS    = 20
+local HIT_FORCE     = 250
+local HIT_COOLDOWN  = 0.6
 -- ───────────────────────────────────────────────────────────────
 
-local flying        = false
-local speedBoost    = false
-local lastHit       = 0
-local bodyVelocity  = nil
-local bodyGyro      = nil
+local flying     = false
+local speedBoost = false
+local lastHit    = 0
+local bv, bg     = nil, nil
 
--- ─── Utilidades ────────────────────────────────────────────────
-local function getChar()
-    return player.Character or player.CharacterAdded:Wait()
+local function getChar()  return player.Character or player.CharacterAdded:Wait() end
+local function getHRP()   local c = getChar(); return c and c:FindFirstChild("HumanoidRootPart") end
+local function getHuman() local c = getChar(); return c and c:FindFirstChildOfClass("Humanoid") end
+
+-- ════════════════════════════════════════════════
+--  GUI
+-- ════════════════════════════════════════════════
+local gui = Instance.new("ScreenGui")
+gui.Name           = "SuperPoderGUI"
+gui.ResetOnSpawn   = false
+gui.IgnoreGuiInset = true
+gui.Parent         = player.PlayerGui
+
+-- Notificación
+local notif = Instance.new("TextLabel")
+notif.Size                   = UDim2.new(0, 320, 0, 44)
+notif.Position               = UDim2.new(0.5, -160, 0, 12)
+notif.BackgroundColor3       = Color3.fromRGB(15,15,15)
+notif.BackgroundTransparency = 0.2
+notif.TextColor3             = Color3.fromRGB(255, 220, 50)
+notif.Font                   = Enum.Font.GothamBold
+notif.TextSize               = 17
+notif.Text                   = "✅ SuperPoderes cargado"
+notif.ZIndex                 = 10
+notif.Parent                 = gui
+Instance.new("UICorner", notif).CornerRadius = UDim.new(0,10)
+
+local function notify(msg, color)
+    notif.Text          = msg
+    notif.TextColor3    = color or Color3.fromRGB(255,220,50)
+    notif.TextTransparency = 0
+    TweenService:Create(notif, TweenInfo.new(2.5, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {TextTransparency = 1}):Play()
 end
 
-local function getHRP()
-    local char = getChar()
-    return char and char:FindFirstChild("HumanoidRootPart")
+-- ─── Contenedor de botones ──────────────────────────────────────
+local frame = Instance.new("Frame")
+frame.Size                   = UDim2.new(0, 230, 0, 200)
+frame.Position               = UDim2.new(1, -245, 0.5, -100)
+frame.BackgroundColor3       = Color3.fromRGB(10,10,10)
+frame.BackgroundTransparency = 0.25
+frame.Parent                 = gui
+Instance.new("UICorner", frame).CornerRadius = UDim.new(0,14)
+
+local title = Instance.new("TextLabel")
+title.Size            = UDim2.new(1,0,0,32)
+title.BackgroundTransparency = 1
+title.TextColor3      = Color3.fromRGB(255,255,255)
+title.Font            = Enum.Font.GothamBold
+title.TextSize        = 15
+title.Text            = "⚡ SUPER PODERES"
+title.Parent          = frame
+
+-- ─── Función para crear botones ─────────────────────────────────
+local function makeBtn(text, color, yPos)
+    local btn = Instance.new("TextButton")
+    btn.Size                   = UDim2.new(1, -20, 0, 48)
+    btn.Position               = UDim2.new(0, 10, 0, yPos)
+    btn.BackgroundColor3       = color
+    btn.TextColor3             = Color3.fromRGB(255,255,255)
+    btn.Font                   = Enum.Font.GothamBold
+    btn.TextSize               = 17
+    btn.Text                   = text
+    btn.AutoButtonColor        = true
+    btn.Parent                 = frame
+    Instance.new("UICorner", btn).CornerRadius = UDim.new(0,10)
+
+    -- Sombra/borde
+    local stroke = Instance.new("UIStroke")
+    stroke.Color     = Color3.fromRGB(255,255,255)
+    stroke.Thickness = 1.5
+    stroke.Transparency = 0.7
+    stroke.Parent    = btn
+
+    return btn
 end
 
-local function getHuman()
-    local char = getChar()
-    return char and char:FindFirstChildOfClass("Humanoid")
-end
+local btnVolar  = makeBtn("🛸  VOLAR  —  OFF", Color3.fromRGB(40,80,200),  36)
+local btnSpeed  = makeBtn("⚡  SPEED  —  OFF", Color3.fromRGB(160,40,200), 94)
+local btnGolpe  = makeBtn("💥  GOLPE EXPLOSIVO",Color3.fromRGB(200,60,30), 152)
 
--- ─── Notificación en pantalla ───────────────────────────────────
-local screenGui = Instance.new("ScreenGui")
-screenGui.Name           = "SuperPoderUI"
-screenGui.ResetOnSpawn   = false
-screenGui.Parent         = player.PlayerGui
-
-local notifLabel = Instance.new("TextLabel")
-notifLabel.Size            = UDim2.new(0, 300, 0, 40)
-notifLabel.Position        = UDim2.new(0.5, -150, 0, 20)
-notifLabel.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
-notifLabel.BackgroundTransparency = 0.3
-notifLabel.TextColor3      = Color3.fromRGB(255, 220, 50)
-notifLabel.Font            = Enum.Font.GothamBold
-notifLabel.TextSize        = 18
-notifLabel.Text            = ""
-notifLabel.Parent          = screenGui
-
-local corner = Instance.new("UICorner")
-corner.CornerRadius = UDim.new(0, 8)
-corner.Parent = notifLabel
-
-local function notify(msg)
-    notifLabel.Text = msg
-    notifLabel.TextTransparency = 0
-    local tween = TweenService:Create(
-        notifLabel,
-        TweenInfo.new(2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
-        { TextTransparency = 1 }
-    )
-    tween:Play()
-end
-
--- ─── HUD de estado ──────────────────────────────────────────────
-local hudFrame = Instance.new("Frame")
-hudFrame.Size              = UDim2.new(0, 180, 0, 70)
-hudFrame.Position          = UDim2.new(0, 16, 0.5, -35)
-hudFrame.BackgroundColor3  = Color3.fromRGB(10, 10, 10)
-hudFrame.BackgroundTransparency = 0.35
-hudFrame.Parent            = screenGui
-Instance.new("UICorner", hudFrame).CornerRadius = UDim.new(0, 10)
-
-local function makeHudLabel(text, yPos)
-    local lbl = Instance.new("TextLabel")
-    lbl.Size              = UDim2.new(1, -12, 0, 28)
-    lbl.Position          = UDim2.new(0, 6, 0, yPos)
-    lbl.BackgroundTransparency = 1
-    lbl.Font              = Enum.Font.GothamBold
-    lbl.TextSize          = 15
-    lbl.TextXAlignment    = Enum.TextXAlignment.Left
-    lbl.Text              = text
-    lbl.TextColor3        = Color3.fromRGB(200, 200, 200)
-    lbl.Parent            = hudFrame
-    return lbl
-end
-
-local flyLabel   = makeHudLabel("🛸 Vuelo  [F]: OFF", 4)
-local speedLabel = makeHudLabel("⚡ Speed  [G]: OFF", 34)
-
-local function updateHUD()
-    flyLabel.Text   = flying     and "🛸 Vuelo  [F]: ON"  or "🛸 Vuelo  [F]: OFF"
-    speedLabel.Text = speedBoost and "⚡ Speed  [G]: ON"  or "⚡ Speed  [G]: OFF"
-    flyLabel.TextColor3   = flying     and Color3.fromRGB(100, 255, 180) or Color3.fromRGB(180,180,180)
-    speedLabel.TextColor3 = speedBoost and Color3.fromRGB(100, 200, 255) or Color3.fromRGB(180,180,180)
-end
-updateHUD()
-
--- ─── VUELO ──────────────────────────────────────────────────────
+-- ════════════════════════════════════════════════
+--  VUELO
+-- ════════════════════════════════════════════════
 local function enableFlight()
     local hrp   = getHRP()
     local human = getHuman()
     if not hrp or not human then return end
-
     human.PlatformStand = true
 
-    bodyVelocity          = Instance.new("BodyVelocity")
-    bodyVelocity.Velocity = Vector3.new(0, 0, 0)
-    bodyVelocity.MaxForce = Vector3.new(1e5, 1e5, 1e5)
-    bodyVelocity.Parent   = hrp
+    bv           = Instance.new("BodyVelocity")
+    bv.Velocity  = Vector3.new(0,0,0)
+    bv.MaxForce  = Vector3.new(1e5,1e5,1e5)
+    bv.Parent    = hrp
 
-    bodyGyro                    = Instance.new("BodyGyro")
-    bodyGyro.MaxTorque          = Vector3.new(1e5, 1e5, 1e5)
-    bodyGyro.P                  = 1e4
-    bodyGyro.CFrame             = hrp.CFrame
-    bodyGyro.Parent             = hrp
-
-    notify("🛸 Vuelo ACTIVADO — Q/E para subir/bajar")
+    bg           = Instance.new("BodyGyro")
+    bg.MaxTorque = Vector3.new(1e5,1e5,1e5)
+    bg.P         = 1e4
+    bg.CFrame    = hrp.CFrame
+    bg.Parent    = hrp
 end
 
 local function disableFlight()
-    local hrp   = getHRP()
     local human = getHuman()
-
-    if bodyVelocity then bodyVelocity:Destroy(); bodyVelocity = nil end
-    if bodyGyro     then bodyGyro:Destroy();     bodyGyro     = nil end
-
+    if bv then bv:Destroy(); bv = nil end
+    if bg then bg:Destroy(); bg = nil end
     if human then human.PlatformStand = false end
-    notify("🛸 Vuelo DESACTIVADO")
 end
 
 local function toggleFlight()
     flying = not flying
-    if flying then enableFlight() else disableFlight() end
-    updateHUD()
+    if flying then
+        enableFlight()
+        btnVolar.Text             = "🛸  VOLAR  —  ON ✅"
+        btnVolar.BackgroundColor3 = Color3.fromRGB(30,180,90)
+        notify("🛸 Vuelo ON — usa WASD para moverte, Q/E subir/bajar", Color3.fromRGB(100,255,180))
+    else
+        disableFlight()
+        btnVolar.Text             = "🛸  VOLAR  —  OFF"
+        btnVolar.BackgroundColor3 = Color3.fromRGB(40,80,200)
+        notify("🛸 Vuelo OFF", Color3.fromRGB(200,200,200))
+    end
 end
 
--- ─── VELOCIDAD ──────────────────────────────────────────────────
+-- ════════════════════════════════════════════════
+--  VELOCIDAD
+-- ════════════════════════════════════════════════
 local function toggleSpeed()
     speedBoost = not speedBoost
     local human = getHuman()
     if human then
         human.WalkSpeed = speedBoost and WALK_SPEED or 16
     end
-    notify(speedBoost and "⚡ Super Velocidad ON" or "⚡ Velocidad normal")
-    updateHUD()
+    if speedBoost then
+        btnSpeed.Text             = "⚡  SPEED  —  ON ✅"
+        btnSpeed.BackgroundColor3 = Color3.fromRGB(30,180,90)
+        notify("⚡ Super Velocidad ON", Color3.fromRGB(100,200,255))
+    else
+        btnSpeed.Text             = "⚡  SPEED  —  OFF"
+        btnSpeed.BackgroundColor3 = Color3.fromRGB(160,40,200)
+        notify("⚡ Velocidad normal", Color3.fromRGB(200,200,200))
+    end
 end
 
--- ─── GOLPE EXPLOSIVO ────────────────────────────────────────────
+-- ════════════════════════════════════════════════
+--  GOLPE EXPLOSIVO
+-- ════════════════════════════════════════════════
 local function superPunch()
     local now = tick()
-    if now - lastHit < HIT_COOLDOWN then return end
+    if now - lastHit < HIT_COOLDOWN then
+        notify("⏳ Espera un momento...", Color3.fromRGB(255,150,50))
+        return
+    end
     lastHit = now
 
     local myHRP = getHRP()
     if not myHRP then return end
 
     local hit = false
-    for _, otherPlayer in ipairs(Players:GetPlayers()) do
-        if otherPlayer ~= player and otherPlayer.Character then
-            local otherHRP = otherPlayer.Character:FindFirstChild("HumanoidRootPart")
-            local otherHuman = otherPlayer.Character:FindFirstChildOfClass("Humanoid")
-
+    for _, other in ipairs(Players:GetPlayers()) do
+        if other ~= player and other.Character then
+            local otherHRP   = other.Character:FindFirstChild("HumanoidRootPart")
+            local otherHuman = other.Character:FindFirstChildOfClass("Humanoid")
             if otherHRP and otherHuman and otherHuman.Health > 0 then
                 local dist = (otherHRP.Position - myHRP.Position).Magnitude
-
                 if dist <= HIT_RADIUS then
-                    -- Dirección del golpe
                     local dir = (otherHRP.Position - myHRP.Position).Unit
-
-                    -- Aplicar fuerza con BodyVelocity temporal
-                    local bv = Instance.new("BodyVelocity")
-                    bv.Velocity  = (dir + Vector3.new(0, 0.6, 0)).Unit * HIT_FORCE
-                    bv.MaxForce  = Vector3.new(1e6, 1e6, 1e6)
-                    bv.P         = 1e5
-                    bv.Parent    = otherHRP
-
-                    -- Quitar la fuerza después de un momento
-                    game:GetService("Debris"):AddItem(bv, 0.15)
-
-                    -- Daño opcional (comentado para no hacer trampas muy obvias)
-                    -- otherHuman:TakeDamage(25)
-
+                    local force = Instance.new("BodyVelocity")
+                    force.Velocity  = (dir + Vector3.new(0, 0.7, 0)).Unit * HIT_FORCE
+                    force.MaxForce  = Vector3.new(1e6,1e6,1e6)
+                    force.P         = 1e5
+                    force.Parent    = otherHRP
+                    game:GetService("Debris"):AddItem(force, 0.18)
                     hit = true
                 end
             end
         end
     end
 
+    -- Flash visual
+    local flash = Instance.new("Frame")
+    flash.Size                   = UDim2.new(1,0,1,0)
+    flash.BackgroundColor3       = Color3.fromRGB(255,100,0)
+    flash.BackgroundTransparency = 0.5
+    flash.ZIndex                 = 20
+    flash.Parent                 = gui
+    TweenService:Create(flash, TweenInfo.new(0.25), {BackgroundTransparency=1}):Play()
+    game:GetService("Debris"):AddItem(flash, 0.3)
+
     if hit then
-        notify("💥 ¡BOOM! ¡Mandado a volar!")
-        -- Efecto visual rápido en pantalla
-        local flash = Instance.new("Frame")
-        flash.Size                    = UDim2.new(1, 0, 1, 0)
-        flash.BackgroundColor3        = Color3.fromRGB(255, 120, 0)
-        flash.BackgroundTransparency  = 0.6
-        flash.ZIndex                  = 10
-        flash.Parent                  = screenGui
-        TweenService:Create(flash, TweenInfo.new(0.3), {BackgroundTransparency = 1}):Play()
-        game:GetService("Debris"):AddItem(flash, 0.4)
+        notify("💥 ¡BOOOOM! ¡A volar!", Color3.fromRGB(255,80,80))
     else
-        notify("😶 Nadie cerca para golpear")
+        notify("😶 No hay nadie cerca (radio: "..HIT_RADIUS.." studs)", Color3.fromRGB(200,200,200))
     end
 end
 
--- ─── INPUT ──────────────────────────────────────────────────────
-UserInputService.InputBegan:Connect(function(input, gpe)
-    if gpe then return end  -- ignorar si el juego procesó el input
+-- ════════════════════════════════════════════════
+--  CONECTAR BOTONES
+-- ════════════════════════════════════════════════
+btnVolar.MouseButton1Click:Connect(toggleFlight)
+btnSpeed.MouseButton1Click:Connect(toggleSpeed)
+btnGolpe.MouseButton1Click:Connect(superPunch)
 
-    if input.KeyCode == Enum.KeyCode.F then
-        toggleFlight()
-    elseif input.KeyCode == Enum.KeyCode.G then
-        toggleSpeed()
-    end
-end)
-
--- Golpe con clic izquierdo
-UserInputService.InputBegan:Connect(function(input, gpe)
+-- También funciona con teclado
+UserInputService.InputBegan:Connect(function(inp, gpe)
     if gpe then return end
-    if input.UserInputType == Enum.UserInputType.MouseButton1 then
-        if flying or true then   -- disponible siempre
-            superPunch()
-        end
+    if inp.KeyCode == Enum.KeyCode.F then toggleFlight()
+    elseif inp.KeyCode == Enum.KeyCode.G then toggleSpeed()
+    elseif inp.KeyCode == Enum.KeyCode.H then superPunch()
     end
 end)
 
--- ─── LOOP DE VUELO ──────────────────────────────────────────────
+-- ════════════════════════════════════════════════
+--  LOOP DE VUELO
+-- ════════════════════════════════════════════════
 RunService.Heartbeat:Connect(function()
-    if not flying or not bodyVelocity or not bodyGyro then return end
-
+    if not flying or not bv or not bg then return end
     local hrp = getHRP()
     if not hrp then return end
 
-    local camDir   = camera.CFrame.LookVector
-    local moveVec  = Vector3.new(0, 0, 0)
+    local move = Vector3.new(0,0,0)
+    if UserInputService:IsKeyDown(Enum.KeyCode.W) then move += camera.CFrame.LookVector end
+    if UserInputService:IsKeyDown(Enum.KeyCode.S) then move -= camera.CFrame.LookVector end
+    if UserInputService:IsKeyDown(Enum.KeyCode.A) then move -= camera.CFrame.RightVector end
+    if UserInputService:IsKeyDown(Enum.KeyCode.D) then move += camera.CFrame.RightVector end
+    if UserInputService:IsKeyDown(Enum.KeyCode.Q) then move += Vector3.new(0,1,0) end
+    if UserInputService:IsKeyDown(Enum.KeyCode.E) then move -= Vector3.new(0,1,0) end
 
-    -- Movimiento basado en cámara
-    if UserInputService:IsKeyDown(Enum.KeyCode.W) then
-        moveVec = moveVec + camDir
-    end
-    if UserInputService:IsKeyDown(Enum.KeyCode.S) then
-        moveVec = moveVec - camDir
-    end
-    if UserInputService:IsKeyDown(Enum.KeyCode.A) then
-        moveVec = moveVec - camera.CFrame.RightVector
-    end
-    if UserInputService:IsKeyDown(Enum.KeyCode.D) then
-        moveVec = moveVec + camera.CFrame.RightVector
-    end
-    -- Subir / Bajar
-    if UserInputService:IsKeyDown(Enum.KeyCode.Q) then
-        moveVec = moveVec + Vector3.new(0, 1, 0)
-    end
-    if UserInputService:IsKeyDown(Enum.KeyCode.E) then
-        moveVec = moveVec - Vector3.new(0, 1, 0)
-    end
-
-    if moveVec.Magnitude > 0 then
-        moveVec = moveVec.Unit
-    end
-
-    bodyVelocity.Velocity = moveVec * FLIGHT_SPEED
-
-    -- Girar hacia donde apunta la cámara
-    bodyGyro.CFrame = CFrame.new(hrp.Position, hrp.Position + camera.CFrame.LookVector)
+    bv.Velocity = (move.Magnitude > 0 and move.Unit or Vector3.new(0,0,0)) * FLIGHT_SPEED
+    bg.CFrame   = CFrame.new(hrp.Position, hrp.Position + camera.CFrame.LookVector)
 end)
 
--- ─── Restablecer al morir ────────────────────────────────────────
-player.CharacterAdded:Connect(function(char)
-    flying     = false
-    speedBoost = false
-    bodyVelocity = nil
-    bodyGyro     = nil
-    updateHUD()
-    notify("🔄 Personaje renació — poderes listos")
+-- ════════════════════════════════════════════════
+--  RESET AL MORIR
+-- ════════════════════════════════════════════════
+local function onCharAdded(char)
+    flying = false; speedBoost = false; bv = nil; bg = nil
+    btnVolar.Text = "🛸  VOLAR  —  OFF"; btnVolar.BackgroundColor3 = Color3.fromRGB(40,80,200)
+    btnSpeed.Text = "⚡  SPEED  —  OFF"; btnSpeed.BackgroundColor3 = Color3.fromRGB(160,40,200)
+    notify("🔄 Renaciste — poderes listos!", Color3.fromRGB(255,220,50))
 
     local human = char:WaitForChild("Humanoid")
     human.Died:Connect(function()
-        flying = false
-        speedBoost = false
-        if bodyVelocity then bodyVelocity:Destroy(); bodyVelocity = nil end
-        if bodyGyro     then bodyGyro:Destroy();     bodyGyro     = nil end
+        flying = false; speedBoost = false
+        if bv then bv:Destroy(); bv = nil end
+        if bg then bg:Destroy(); bg = nil end
     end)
-end)
 
-print("[SuperPoderes] Script cargado correctamente ✅")
-print("  F = Vuelo ON/OFF | G = Speed ON/OFF | Clic = Golpe explosivo")
+    -- Aplicar velocidad si estaba activa
+    if speedBoost then human.WalkSpeed = WALK_SPEED end
+end
+
+player.CharacterAdded:Connect(onCharAdded)
+if player.Character then onCharAdded(player.Character) end
+
+print("[SuperPoderes GUI] Listo ✅")
