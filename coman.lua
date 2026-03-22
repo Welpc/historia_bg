@@ -1,19 +1,21 @@
 -- ══════════════════════════════════════════════════════════════
 --  LeaderstatsEditor — EJECUTADOR
---  Compatible con Synapse X, KRNL, Fluxus, Solara, etc.
---  Pégalo directo en el ejecutador y dale Execute
+--  Synapse X, KRNL, Fluxus, Solara, etc.
+--  Pégalo y dale Execute — sin esperas, respuesta inmediata
 -- ══════════════════════════════════════════════════════════════
 
 local Players           = game:GetService("Players")
 local UIS               = game:GetService("UserInputService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local RunService        = game:GetService("RunService")
 local LocalPlayer       = Players.LocalPlayer
 
--- Destruye GUI anterior si ya existe (re-ejecución)
-local existing = LocalPlayer:FindFirstChild("PlayerGui") and
-	LocalPlayer.PlayerGui:FindFirstChild("LeaderstatsEditorGUI")
-if existing then existing:Destroy() end
+-- Destruye GUI anterior si ya existe
+pcall(function()
+	game:GetService("CoreGui"):FindFirstChild("LeaderstatsEditorGUI"):Destroy()
+end)
+pcall(function()
+	LocalPlayer.PlayerGui:FindFirstChild("LeaderstatsEditorGUI"):Destroy()
+end)
 
 -- ══════════════════════════════════════════
 --  SCANNER DE REMOTES
@@ -40,114 +42,63 @@ local function scanAllRemotes()
 	return list
 end
 
-local cachedRemote = nil
-local cachedFmt    = nil
-
+-- Formatos de parámetros más comunes
 local FORMATS = {
-	function(p,s,v,r) return {p.Name, s, v} end,
-	function(p,s,v,r) return {p,      s, v} end,
-	function(p,s,v,r) return {s,         v} end,
-	function(p,s,v,r) return {p.UserId,s, v} end,
-	function(p,s,v,r) return {p.Name, s, r} end,
-	function(p,s,v,r) return {p,      s, r} end,
-	function(p,s,v,r) return {s,         r} end,
-	function(p,s,v,r) return {p.Name,    v} end,
-	function(p,s,v,r) return {p,         v} end,
-	function(p,s,v,r) return {p.Name, v, s} end,
-	function(p,s,v,r) return {p.UserId,  v} end,
+	function(p,s,v) return {p.Name, s, v} end,
+	function(p,s,v) return {p,      s, v} end,
+	function(p,s,v) return {s,         v} end,
+	function(p,s,v) return {p.UserId,s, v} end,
+	function(p,s,v) return {p.Name, v, s} end,
+	function(p,s,v) return {p,      v, s} end,
+	function(p,s,v) return {p.Name,    v} end,
+	function(p,s,v) return {p,         v} end,
+	function(p,s,v) return {p.UserId,  v} end,
 }
 
-local function fireRemote(remote, args)
-	if not remote or not remote.Parent then return end
-	if remote:IsA("RemoteEvent") then
-		pcall(function() remote:FireServer(table.unpack(args)) end)
-	else
-		pcall(function() remote:InvokeServer(table.unpack(args)) end)
-	end
-end
-
-local WAIT_TIME = 1.2
-
-local function waitForChange(stat, targetVal)
-	local changed = false
-	local conn
-	conn = stat.Changed:Connect(function(v)
-		if tonumber(v) == tonumber(targetVal) then
-			changed = true
+-- Dispara un remote con un formato, devuelve true/false sin esperar
+local function tryFire(remote, args)
+	if not remote or not remote.Parent then return false end
+	local ok = pcall(function()
+		if remote:IsA("RemoteEvent") then
+			remote:FireServer(table.unpack(args))
+		else
+			remote:InvokeServer(table.unpack(args))
 		end
 	end)
-	local t = 0
-	while not changed and t < WAIT_TIME do
-		task.wait(0.05)
-		t = t + 0.05
-		if tonumber(stat.Value) == tonumber(targetVal) then
-			changed = true
-		end
-	end
-	conn:Disconnect()
-	return changed
-end
-
-local function autoFire(player, stat, targetVal, onProgress)
-	local rawVal = tostring(targetVal)
-
-	if cachedRemote and cachedRemote.Parent and cachedFmt then
-		fireRemote(cachedRemote, cachedFmt(player, stat.Name, targetVal, rawVal))
-		if waitForChange(stat, targetVal) then
-			return true, cachedRemote:GetFullName()
-		end
-		cachedRemote = nil; cachedFmt = nil
-	end
-
-	local remotes = scanAllRemotes()
-	local total   = #remotes * #FORMATS
-	local tried   = 0
-
-	for _, remote in ipairs(remotes) do
-		for _, fmt in ipairs(FORMATS) do
-			tried = tried + 1
-			if onProgress then onProgress(tried, total, remote.Name) end
-			fireRemote(remote, fmt(player, stat.Name, targetVal, rawVal))
-			if waitForChange(stat, targetVal) then
-				cachedRemote = remote
-				cachedFmt    = fmt
-				return true, remote:GetFullName()
-			end
-		end
-	end
-
-	return false, "ningún remote cambió el valor (" .. #remotes .. " probados)"
+	return ok
 end
 
 -- ══════════════════════════════════════════
---  GUI — se mete directo en PlayerGui
+--  GUI
 -- ══════════════════════════════════════════
-local playerGui = LocalPlayer:WaitForChild("PlayerGui")
-
 local ScreenGui = Instance.new("ScreenGui")
 ScreenGui.Name = "LeaderstatsEditorGUI"
 ScreenGui.ResetOnSpawn = false
 ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
--- En ejecutadores hay que usar esto para que no se destruya
-pcall(function() ScreenGui.DisplayOrder = 999 end)
+ScreenGui.DisplayOrder = 999
+
+-- Intenta CoreGui primero (ejecutadores), fallback a PlayerGui
+local guiParented = false
 pcall(function()
-	-- Algunos ejecutadores requieren esto para que la GUI persista
 	ScreenGui.Parent = game:GetService("CoreGui")
+	guiParented = true
 end)
-if not ScreenGui.Parent then
-	ScreenGui.Parent = playerGui
+if not guiParented then
+	ScreenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
 end
 
+-- Toggle
 local ToggleBtn = Instance.new("TextButton")
 ToggleBtn.Size = UDim2.new(0,42,0,42)
 ToggleBtn.Position = UDim2.new(0,12,0.5,-21)
 ToggleBtn.BackgroundColor3 = Color3.fromRGB(30,215,96)
-ToggleBtn.Text = "💰"
-ToggleBtn.TextSize = 20; ToggleBtn.Font = Enum.Font.GothamBold
+ToggleBtn.Text = "💰"; ToggleBtn.TextSize = 20
+ToggleBtn.Font = Enum.Font.GothamBold
 ToggleBtn.BorderSizePixel = 0; ToggleBtn.AutoButtonColor = false
 ToggleBtn.Parent = ScreenGui
 Instance.new("UICorner", ToggleBtn).CornerRadius = UDim.new(1,0)
 
+-- Frame
 local Frame = Instance.new("Frame")
 Frame.Size = UDim2.new(0,300,0,445)
 Frame.Position = UDim2.new(0,62,0.5,-222)
@@ -160,10 +111,10 @@ FStroke.Color = Color3.fromRGB(30,215,96); FStroke.Thickness = 1.2
 
 local GlowBar = Instance.new("Frame", Frame)
 GlowBar.Size = UDim2.new(1,0,0,2)
-GlowBar.BackgroundColor3 = Color3.fromRGB(30,215,96)
-GlowBar.BorderSizePixel = 0
+GlowBar.BackgroundColor3 = Color3.fromRGB(30,215,96); GlowBar.BorderSizePixel = 0
 Instance.new("UICorner", GlowBar).CornerRadius = UDim.new(0,12)
 
+-- Header
 local Header = Instance.new("TextButton")
 Header.Size = UDim2.new(1,0,0,40)
 Header.BackgroundTransparency = 1; Header.Text = ""; Header.AutoButtonColor = false
@@ -193,6 +144,7 @@ local function makeLabel(text, y)
 	return l
 end
 
+-- Jugadores
 makeLabel("JUGADOR", 46)
 local PlayerScroll = Instance.new("ScrollingFrame", Frame)
 PlayerScroll.Size = UDim2.new(1,-24,0,66); PlayerScroll.Position = UDim2.new(0,12,0,62)
@@ -205,9 +157,10 @@ PSL.SortOrder = Enum.SortOrder.Name; PSL.Padding = UDim.new(0,3)
 local PSP = Instance.new("UIPadding", PlayerScroll)
 PSP.PaddingTop = UDim.new(0,4); PSP.PaddingLeft = UDim.new(0,4); PSP.PaddingRight = UDim.new(0,4)
 
-makeLabel("LEADERSTATS  —  edita el número y presiona ✔", 136)
+-- Stats
+makeLabel("LEADERSTATS  —  cambia el número y presiona ✔", 136)
 local StatsScroll = Instance.new("ScrollingFrame", Frame)
-StatsScroll.Size = UDim2.new(1,-24,0,236); StatsScroll.Position = UDim2.new(0,12,0,152)
+StatsScroll.Size = UDim2.new(1,-24,0,240); StatsScroll.Position = UDim2.new(0,12,0,152)
 StatsScroll.BackgroundColor3 = Color3.fromRGB(18,18,28); StatsScroll.BorderSizePixel = 0
 StatsScroll.ScrollBarThickness = 3; StatsScroll.ScrollBarImageColor3 = Color3.fromRGB(30,215,96)
 StatsScroll.CanvasSize = UDim2.new(0,0,0,0); StatsScroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
@@ -223,29 +176,32 @@ NoStatsLabel.Text = "Selecciona un jugador..."
 NoStatsLabel.TextColor3 = Color3.fromRGB(70,70,90)
 NoStatsLabel.TextSize = 11; NoStatsLabel.Font = Enum.Font.Gotham
 
+-- Barra progreso
 local ProgBg = Instance.new("Frame", Frame)
-ProgBg.Size = UDim2.new(1,-24,0,5); ProgBg.Position = UDim2.new(0,12,0,396)
+ProgBg.Size = UDim2.new(1,-24,0,5); ProgBg.Position = UDim2.new(0,12,0,400)
 ProgBg.BackgroundColor3 = Color3.fromRGB(22,22,32); ProgBg.BorderSizePixel = 0
 Instance.new("UICorner", ProgBg).CornerRadius = UDim.new(1,0)
-
 local ProgFill = Instance.new("Frame", ProgBg)
 ProgFill.Size = UDim2.new(0,0,1,0)
 ProgFill.BackgroundColor3 = Color3.fromRGB(30,215,96); ProgFill.BorderSizePixel = 0
 Instance.new("UICorner", ProgFill).CornerRadius = UDim.new(1,0)
 
+-- Status
 local StatusLabel = Instance.new("TextLabel", Frame)
-StatusLabel.Size = UDim2.new(1,-24,0,14); StatusLabel.Position = UDim2.new(0,12,0,404)
+StatusLabel.Size = UDim2.new(1,-24,0,14); StatusLabel.Position = UDim2.new(0,12,0,408)
 StatusLabel.BackgroundTransparency = 1; StatusLabel.Text = "Selecciona un jugador"
 StatusLabel.TextColor3 = Color3.fromRGB(70,70,90)
 StatusLabel.TextSize = 9; StatusLabel.Font = Enum.Font.Gotham
-StatusLabel.TextXAlignment = Enum.TextXAlignment.Left; StatusLabel.TextTruncate = Enum.TextTruncate.AtEnd
+StatusLabel.TextXAlignment = Enum.TextXAlignment.Left
+StatusLabel.TextTruncate = Enum.TextTruncate.AtEnd
 
 local RemoteLabel = Instance.new("TextLabel", Frame)
-RemoteLabel.Size = UDim2.new(1,-24,0,13); RemoteLabel.Position = UDim2.new(0,12,0,420)
+RemoteLabel.Size = UDim2.new(1,-24,0,13); RemoteLabel.Position = UDim2.new(0,12,0,424)
 RemoteLabel.BackgroundTransparency = 1; RemoteLabel.Text = ""
 RemoteLabel.TextColor3 = Color3.fromRGB(80,180,255)
 RemoteLabel.TextSize = 8; RemoteLabel.Font = Enum.Font.Gotham
-RemoteLabel.TextXAlignment = Enum.TextXAlignment.Left; RemoteLabel.TextTruncate = Enum.TextTruncate.AtEnd
+RemoteLabel.TextXAlignment = Enum.TextXAlignment.Left
+RemoteLabel.TextTruncate = Enum.TextTruncate.AtEnd
 
 local function setStatus(msg, col)
 	StatusLabel.Text = msg
@@ -274,7 +230,7 @@ UIS.InputEnded:Connect(function(i)
 end)
 
 -- ══════════════════════════════════════════
---  FILAS DE STATS
+--  LÓGICA DE STATS
 -- ══════════════════════════════════════════
 local selectedPlayer = nil
 local playerButtons  = {}
@@ -316,6 +272,7 @@ local function makeStatRow(plr, stat, index)
 	typeL.TextSize = 9; typeL.Font = Enum.Font.Gotham
 	typeL.TextXAlignment = Enum.TextXAlignment.Left
 
+	-- Caja de valor
 	local valBox = Instance.new(isNum and "TextBox" or "TextLabel", row)
 	valBox.Size = UDim2.new(0,82,0,32); valBox.Position = UDim2.new(1,-120,0.5,-16)
 	valBox.BackgroundColor3 = Color3.fromRGB(14,14,22)
@@ -328,20 +285,21 @@ local function makeStatRow(plr, stat, index)
 	local VS = Instance.new("UIStroke", valBox)
 	VS.Color = Color3.fromRGB(40,40,60); VS.Thickness = 1
 	local VP = Instance.new("UIPadding", valBox); VP.PaddingLeft = UDim.new(0,6)
-
 	if isNum then
 		valBox.Focused:Connect(function() VS.Color = Color3.fromRGB(30,215,96) end)
 		valBox.FocusLost:Connect(function() VS.Color = Color3.fromRGB(40,40,60) end)
 	end
 
-	-- Actualiza el valor mostrado si cambia desde servidor
+	-- Actualiza si el stat cambia desde el servidor
 	stat.Changed:Connect(function(v)
 		if valBox and valBox.Parent then
-			local focused = isNum and pcall(function() return valBox:IsFocused() end) or false
+			local focused = false
+			pcall(function() focused = valBox:IsFocused() end)
 			if not focused then valBox.Text = tostring(v) end
 		end
 	end)
 
+	-- Botón ✔
 	local confirmBtn = Instance.new("TextButton", row)
 	confirmBtn.Size = UDim2.new(0,32,0,32); confirmBtn.Position = UDim2.new(1,-36,0.5,-16)
 	confirmBtn.BackgroundColor3 = isNum and Color3.fromRGB(20,80,35) or Color3.fromRGB(25,25,35)
@@ -359,10 +317,9 @@ local function makeStatRow(plr, stat, index)
 		local num = tonumber(valBox.Text)
 		if not num then
 			valBox.Text = tostring(stat.Value)
-			setStatus("⚠️ Valor inválido en " .. stat.Name, Color3.fromRGB(255,200,50))
+			setStatus("⚠️ Valor inválido", Color3.fromRGB(255,200,50))
 			return
 		end
-
 		if tonumber(stat.Value) == num then
 			setStatus("ℹ️ " .. stat.Name .. " ya vale " .. tostring(num), Color3.fromRGB(100,150,255))
 			return
@@ -374,44 +331,63 @@ local function makeStatRow(plr, stat, index)
 		ProgFill.BackgroundColor3 = Color3.fromRGB(30,215,96)
 		ProgFill.Size = UDim2.new(0,0,1,0)
 		RemoteLabel.Text = ""
-		setStatus("🔎 Buscando remote para " .. stat.Name .. "...", Color3.fromRGB(200,200,50))
 
 		task.spawn(function()
-			local ok, result = autoFire(
-				plr, stat, num,
-				function(tried, total, remoteName)
+			local remotes = scanAllRemotes()
+			local total = #remotes * #FORMATS
+			local tried = 0
+			local fired = {} -- remotes que no tiraron error
+
+			setStatus("🔎 Probando " .. #remotes .. " remotes...", Color3.fromRGB(200,200,50))
+
+			for _, remote in ipairs(remotes) do
+				for _, fmt in ipairs(FORMATS) do
+					tried = tried + 1
 					ProgFill.Size = UDim2.new(tried/total, 0, 1, 0)
-					setStatus("🔎 Probando " .. remoteName .. "...", Color3.fromRGB(160,160,50))
+
+					local args = fmt(plr, stat.Name, num)
+					local ok = tryFire(remote, args)
+					if ok then
+						table.insert(fired, remote:GetFullName())
+					end
+
+					-- Pequeña pausa para no freezear
+					if tried % 10 == 0 then task.wait() end
 				end
-			)
+			end
 
 			ProgFill.Size = UDim2.new(1,0,1,0)
-			task.wait(0.1)
 
-			local realVal = stat.Value
+			if #fired > 0 then
+				-- Espera un momento a ver si el stat cambió
+				task.wait(0.3)
+				local realVal = tonumber(stat.Value)
 
-			if ok and tonumber(realVal) == num then
-				confirmBtn.Text = "✅"; confirmBtn.BackgroundColor3 = Color3.fromRGB(10,110,35)
-				RS.Color = Color3.fromRGB(30,215,96); VS.Color = Color3.fromRGB(30,215,96)
-				setStatus("✅ " .. stat.Name .. " = " .. tostring(num), Color3.fromRGB(30,215,96))
-				RemoteLabel.Text = "🌐 " .. result
-				ProgFill.BackgroundColor3 = Color3.fromRGB(30,215,96)
-			elseif ok then
-				confirmBtn.Text = "⚠️"; confirmBtn.BackgroundColor3 = Color3.fromRGB(100,70,10)
-				RS.Color = Color3.fromRGB(200,150,30)
-				valBox.Text = tostring(realVal)
-				setStatus("⚠️ Remote disparó pero el servidor no aplicó el cambio", Color3.fromRGB(255,180,50))
-				RemoteLabel.Text = result .. " (no aplicó)"
-				ProgFill.BackgroundColor3 = Color3.fromRGB(200,150,30)
+				if realVal == num then
+					-- Cambió de verdad ✅
+					confirmBtn.Text = "✅"; confirmBtn.BackgroundColor3 = Color3.fromRGB(10,110,35)
+					RS.Color = Color3.fromRGB(30,215,96); VS.Color = Color3.fromRGB(30,215,96)
+					setStatus("✅ " .. stat.Name .. " = " .. tostring(num), Color3.fromRGB(30,215,96))
+					RemoteLabel.Text = "🌐 " .. fired[1]
+					ProgFill.BackgroundColor3 = Color3.fromRGB(30,215,96)
+				else
+					-- Se dispararon remotes pero el valor no cambió aún
+					-- puede tardar un poco más en replicar
+					confirmBtn.Text = "📡"; confirmBtn.BackgroundColor3 = Color3.fromRGB(20,60,100)
+					RS.Color = Color3.fromRGB(80,150,255)
+					setStatus("📡 Enviado a " .. #fired .. " remote(s) — verifica ingame", Color3.fromRGB(80,180,255))
+					RemoteLabel.Text = "Remote: " .. fired[1]
+					ProgFill.BackgroundColor3 = Color3.fromRGB(80,150,255)
+				end
 			else
 				confirmBtn.Text = "❌"; confirmBtn.BackgroundColor3 = Color3.fromRGB(110,18,18)
 				RS.Color = Color3.fromRGB(200,40,40)
-				valBox.Text = tostring(realVal)
-				setStatus("❌ " .. result, Color3.fromRGB(255,70,70))
+				valBox.Text = tostring(stat.Value)
+				setStatus("❌ Ningún remote aceptó el disparo (" .. #remotes .. " probados)", Color3.fromRGB(255,70,70))
 				ProgFill.BackgroundColor3 = Color3.fromRGB(180,40,40)
 			end
 
-			task.wait(2)
+			task.wait(2.5)
 			confirmBtn.Text = "✔"; confirmBtn.BackgroundColor3 = Color3.fromRGB(20,80,35)
 			confirmBtn.TextColor3 = Color3.fromRGB(30,215,96)
 			RS.Color = Color3.fromRGB(35,35,55); VS.Color = Color3.fromRGB(40,40,60)
@@ -440,6 +416,7 @@ local function loadStats(plr)
 	end
 end
 
+-- ── Jugadores ────────────────────────────
 local function refreshPlayers()
 	for _, b in pairs(playerButtons) do b:Destroy() end
 	playerButtons = {}; selectedPlayer = nil
@@ -472,7 +449,7 @@ local function refreshPlayers()
 	end
 end
 
--- Toggle / Close
+-- ── Toggle / Close ───────────────────────
 local open = false
 ToggleBtn.MouseButton1Click:Connect(function()
 	open = not open
