@@ -1,6 +1,6 @@
 -- ══════════════════════════════════════════════════════════════
 --  LeaderstatsEditor — StarterPlayerScripts (LocalScript)
---  Tú eliges el remote, pones el valor y lo dispara
+--  Pones el stat + valor → busca solo el remote que responde
 -- ══════════════════════════════════════════════════════════════
 
 local Players           = game:GetService("Players")
@@ -9,7 +9,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local LocalPlayer       = Players.LocalPlayer
 
 -- ══════════════════════════════════════════
---  SCANNER DE REMOTES
+--  SCANNER
 -- ══════════════════════════════════════════
 local function getAllRemotes(parent, list, depth)
 	depth = depth or 0
@@ -31,8 +31,64 @@ local function scanAllRemotes()
 	return list
 end
 
+-- Guarda el remote + formato que funcionó para no volver a buscar
+local cachedRemote = nil
+local cachedFmt    = nil
+
+local function tryFire(remote, args)
+	if remote:IsA("RemoteEvent") then
+		return pcall(function() remote:FireServer(table.unpack(args)) end)
+	else
+		return pcall(function() remote:InvokeServer(table.unpack(args)) end)
+	end
+end
+
+-- Busca y dispara: devuelve (true, remoteName) o (false, "motivo")
+local function autoFire(player, statName, finalVal, rawVal, onProgress)
+	-- Si ya tenemos cache, úsalo primero
+	if cachedRemote and cachedRemote.Parent and cachedFmt then
+		local ok = tryFire(cachedRemote, cachedFmt(player, statName, finalVal, rawVal))
+		if ok then return true, cachedRemote:GetFullName() end
+		cachedRemote = nil; cachedFmt = nil  -- cache inválido, re-busca
+	end
+
+	local formats = {
+		function(p, s, v, r) return {p.Name, s, v} end,
+		function(p, s, v, r) return {p,      s, v} end,
+		function(p, s, v, r) return {s,         v} end,
+		function(p, s, v, r) return {p.UserId, s, v} end,
+		function(p, s, v, r) return {p.Name, s, r} end,
+		function(p, s, v, r) return {p,      s, r} end,
+		function(p, s, v, r) return {s,         r} end,
+		function(p, s, v, r) return {p.Name,    v} end,
+		function(p, s, v, r) return {p,         v} end,
+		function(p, s, v, r) return {p.Name, v, s} end,
+		function(p, s, v, r) return {p.UserId,  v} end,
+	}
+
+	local remotes = scanAllRemotes()
+	local total   = #remotes * #formats
+	local tried   = 0
+
+	for _, remote in ipairs(remotes) do
+		for _, fmt in ipairs(formats) do
+			tried = tried + 1
+			if onProgress then onProgress(tried, total, remote.Name) end
+
+			local ok = tryFire(remote, fmt(player, statName, finalVal, rawVal))
+			if ok then
+				cachedRemote = remote
+				cachedFmt    = fmt
+				return true, remote:GetFullName()
+			end
+		end
+	end
+
+	return false, "ningún remote respondió (" .. #remotes .. " probados)"
+end
+
 -- ══════════════════════════════════════════
---  GUI BASE
+--  GUI
 -- ══════════════════════════════════════════
 local ScreenGui = Instance.new("ScreenGui")
 ScreenGui.Name = "LeaderstatsEditorGUI"
@@ -40,7 +96,6 @@ ScreenGui.ResetOnSpawn = false
 ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 ScreenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
 
--- Toggle btn
 local ToggleBtn = Instance.new("TextButton")
 ToggleBtn.Size = UDim2.new(0,42,0,42)
 ToggleBtn.Position = UDim2.new(0,12,0.5,-21)
@@ -53,11 +108,9 @@ ToggleBtn.AutoButtonColor = false
 ToggleBtn.Parent = ScreenGui
 Instance.new("UICorner", ToggleBtn).CornerRadius = UDim.new(1,0)
 
--- Frame principal
 local Frame = Instance.new("Frame")
-Frame.Name = "MainFrame"
-Frame.Size = UDim2.new(0,310,0,480)
-Frame.Position = UDim2.new(0,62,0.5,-240)
+Frame.Size = UDim2.new(0,290,0,360)
+Frame.Position = UDim2.new(0,62,0.5,-180)
 Frame.BackgroundColor3 = Color3.fromRGB(12,12,18)
 Frame.BorderSizePixel = 0
 Frame.Visible = false
@@ -74,12 +127,10 @@ GlowBar.BackgroundColor3 = Color3.fromRGB(30,215,96)
 GlowBar.BorderSizePixel = 0
 Instance.new("UICorner", GlowBar).CornerRadius = UDim.new(0,12)
 
--- Header drag
 local Header = Instance.new("TextButton")
 Header.Size = UDim2.new(1,0,0,40)
 Header.BackgroundTransparency = 1
-Header.Text = ""
-Header.AutoButtonColor = false
+Header.Text = ""; Header.AutoButtonColor = false
 Header.Parent = Frame
 
 local Title = Instance.new("TextLabel", Header)
@@ -96,31 +147,48 @@ local CloseBtn = Instance.new("TextButton", Header)
 CloseBtn.Size = UDim2.new(0,24,0,24)
 CloseBtn.Position = UDim2.new(1,-30,0.5,-12)
 CloseBtn.BackgroundColor3 = Color3.fromRGB(40,40,55)
-CloseBtn.Text = "✕"
-CloseBtn.TextColor3 = Color3.fromRGB(160,160,160)
-CloseBtn.TextSize = 11
-CloseBtn.Font = Enum.Font.GothamBold
+CloseBtn.Text = "✕"; CloseBtn.TextColor3 = Color3.fromRGB(160,160,160)
+CloseBtn.TextSize = 11; CloseBtn.Font = Enum.Font.GothamBold
 CloseBtn.BorderSizePixel = 0
 Instance.new("UICorner", CloseBtn).CornerRadius = UDim.new(1,0)
 
--- ── Sección 1: Jugadores ──────────────────
-local function makeLabel(parent, text, y)
-	local l = Instance.new("TextLabel", parent)
+local function makeLabel(text, y)
+	local l = Instance.new("TextLabel", Frame)
 	l.Size = UDim2.new(1,-24,0,13)
 	l.Position = UDim2.new(0,12,0,y)
 	l.BackgroundTransparency = 1
 	l.Text = text
 	l.TextColor3 = Color3.fromRGB(30,215,96)
-	l.TextSize = 9
-	l.Font = Enum.Font.GothamBold
+	l.TextSize = 9; l.Font = Enum.Font.GothamBold
 	l.TextXAlignment = Enum.TextXAlignment.Left
 	return l
 end
 
-makeLabel(Frame, "JUGADOR", 46)
+local function makeBox(y, placeholder)
+	local box = Instance.new("TextBox", Frame)
+	box.Size = UDim2.new(1,-24,0,32)
+	box.Position = UDim2.new(0,12,0,y)
+	box.BackgroundColor3 = Color3.fromRGB(18,18,28)
+	box.Text = ""
+	box.PlaceholderText = placeholder
+	box.TextColor3 = Color3.fromRGB(255,255,255)
+	box.PlaceholderColor3 = Color3.fromRGB(60,60,80)
+	box.TextSize = 12; box.Font = Enum.Font.GothamBold
+	box.BorderSizePixel = 0; box.ClearTextOnFocus = false
+	Instance.new("UICorner", box).CornerRadius = UDim.new(0,8)
+	local s = Instance.new("UIStroke", box)
+	s.Color = Color3.fromRGB(45,45,65); s.Thickness = 1
+	box.Focused:Connect(function() s.Color = Color3.fromRGB(30,215,96) end)
+	box.FocusLost:Connect(function() s.Color = Color3.fromRGB(45,45,65) end)
+	local p = Instance.new("UIPadding", box); p.PaddingLeft = UDim.new(0,10)
+	return box
+end
+
+-- ── Jugadores ────────────────────────────
+makeLabel("JUGADOR", 46)
 
 local PlayerScroll = Instance.new("ScrollingFrame", Frame)
-PlayerScroll.Size = UDim2.new(1,-24,0,60)
+PlayerScroll.Size = UDim2.new(1,-24,0,66)
 PlayerScroll.Position = UDim2.new(0,12,0,62)
 PlayerScroll.BackgroundColor3 = Color3.fromRGB(18,18,28)
 PlayerScroll.BorderSizePixel = 0
@@ -129,134 +197,87 @@ PlayerScroll.ScrollBarImageColor3 = Color3.fromRGB(30,215,96)
 PlayerScroll.CanvasSize = UDim2.new(0,0,0,0)
 PlayerScroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
 Instance.new("UICorner", PlayerScroll).CornerRadius = UDim.new(0,8)
-local PSLayout = Instance.new("UIListLayout", PlayerScroll)
-PSLayout.SortOrder = Enum.SortOrder.Name
-PSLayout.Padding = UDim.new(0,3)
-local PSPad = Instance.new("UIPadding", PlayerScroll)
-PSPad.PaddingTop = UDim.new(0,4); PSPad.PaddingLeft = UDim.new(0,4); PSPad.PaddingRight = UDim.new(0,4)
+local PSL = Instance.new("UIListLayout", PlayerScroll)
+PSL.SortOrder = Enum.SortOrder.Name; PSL.Padding = UDim.new(0,3)
+local PSP = Instance.new("UIPadding", PlayerScroll)
+PSP.PaddingTop = UDim.new(0,4); PSP.PaddingLeft = UDim.new(0,4); PSP.PaddingRight = UDim.new(0,4)
 
--- ── Sección 2: Remotes ───────────────────
-makeLabel(Frame, "REMOTE A USAR", 130)
+local RefreshBtn = Instance.new("TextButton", Frame)
+RefreshBtn.Size = UDim2.new(1,-24,0,22)
+RefreshBtn.Position = UDim2.new(0,12,0,133)
+RefreshBtn.BackgroundColor3 = Color3.fromRGB(18,40,25)
+RefreshBtn.Text = "🔄 Actualizar jugadores"
+RefreshBtn.TextColor3 = Color3.fromRGB(30,215,96)
+RefreshBtn.TextSize = 10; RefreshBtn.Font = Enum.Font.GothamBold
+RefreshBtn.BorderSizePixel = 0
+Instance.new("UICorner", RefreshBtn).CornerRadius = UDim.new(0,6)
 
-local RemoteScroll = Instance.new("ScrollingFrame", Frame)
-RemoteScroll.Size = UDim2.new(1,-24,0,80)
-RemoteScroll.Position = UDim2.new(0,12,0,146)
-RemoteScroll.BackgroundColor3 = Color3.fromRGB(18,18,28)
-RemoteScroll.BorderSizePixel = 0
-RemoteScroll.ScrollBarThickness = 3
-RemoteScroll.ScrollBarImageColor3 = Color3.fromRGB(80,180,255)
-RemoteScroll.CanvasSize = UDim2.new(0,0,0,0)
-RemoteScroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
-Instance.new("UICorner", RemoteScroll).CornerRadius = UDim.new(0,8)
-local RSLayout = Instance.new("UIListLayout", RemoteScroll)
-RSLayout.SortOrder = Enum.SortOrder.LayoutOrder
-RSLayout.Padding = UDim.new(0,3)
-local RSPad = Instance.new("UIPadding", RemoteScroll)
-RSPad.PaddingTop = UDim.new(0,4); RSPad.PaddingLeft = UDim.new(0,4); RSPad.PaddingRight = UDim.new(0,4)
+-- ── Stat + Valor ─────────────────────────
+makeLabel("NOMBRE DEL STAT", 164)
+local StatBox = makeBox(180, "ej: Cash, Coins, Level...")
 
-local ScanBtn = Instance.new("TextButton", Frame)
-ScanBtn.Size = UDim2.new(1,-24,0,24)
-ScanBtn.Position = UDim2.new(0,12,0,232)
-ScanBtn.BackgroundColor3 = Color3.fromRGB(20,50,80)
-ScanBtn.Text = "🔎  Escanear remotes del juego"
-ScanBtn.TextColor3 = Color3.fromRGB(80,180,255)
-ScanBtn.TextSize = 10
-ScanBtn.Font = Enum.Font.GothamBold
-ScanBtn.BorderSizePixel = 0
-Instance.new("UICorner", ScanBtn).CornerRadius = UDim.new(0,8)
+makeLabel("VALOR NUEVO", 220)
+local ValBox = makeBox(236, "ej: 9999")
 
-local SelectedRemoteLabel = Instance.new("TextLabel", Frame)
-SelectedRemoteLabel.Size = UDim2.new(1,-24,0,18)
-SelectedRemoteLabel.Position = UDim2.new(0,12,0,262)
-SelectedRemoteLabel.BackgroundTransparency = 1
-SelectedRemoteLabel.Text = "Ningún remote seleccionado"
-SelectedRemoteLabel.TextColor3 = Color3.fromRGB(100,100,120)
-SelectedRemoteLabel.TextSize = 9
-SelectedRemoteLabel.Font = Enum.Font.Gotham
-SelectedRemoteLabel.TextXAlignment = Enum.TextXAlignment.Left
-SelectedRemoteLabel.TextTruncate = Enum.TextTruncate.AtEnd
-
--- ── Sección 3: Stat + Valor + Enviar ─────
-makeLabel(Frame, "NOMBRE DEL STAT", 286)
-
-local StatNameBox = Instance.new("TextBox", Frame)
-StatNameBox.Size = UDim2.new(1,-24,0,30)
-StatNameBox.Position = UDim2.new(0,12,0,302)
-StatNameBox.BackgroundColor3 = Color3.fromRGB(18,18,28)
-StatNameBox.Text = ""
-StatNameBox.PlaceholderText = "ej: Cash, Coins, Level..."
-StatNameBox.TextColor3 = Color3.fromRGB(255,255,255)
-StatNameBox.PlaceholderColor3 = Color3.fromRGB(70,70,90)
-StatNameBox.TextSize = 11
-StatNameBox.Font = Enum.Font.Gotham
-StatNameBox.BorderSizePixel = 0
-StatNameBox.ClearTextOnFocus = false
-Instance.new("UICorner", StatNameBox).CornerRadius = UDim.new(0,8)
-local SNStroke = Instance.new("UIStroke", StatNameBox)
-SNStroke.Color = Color3.fromRGB(50,50,70); SNStroke.Thickness = 1
-StatNameBox.Focused:Connect(function() SNStroke.Color = Color3.fromRGB(30,215,96) end)
-StatNameBox.FocusLost:Connect(function() SNStroke.Color = Color3.fromRGB(50,50,70) end)
-local SNPad = Instance.new("UIPadding", StatNameBox); SNPad.PaddingLeft = UDim.new(0,8)
-
-makeLabel(Frame, "VALOR NUEVO", 340)
-
-local ValueBox = Instance.new("TextBox", Frame)
-ValueBox.Size = UDim2.new(1,-24,0,30)
-ValueBox.Position = UDim2.new(0,12,0,356)
-ValueBox.BackgroundColor3 = Color3.fromRGB(18,18,28)
-ValueBox.Text = ""
-ValueBox.PlaceholderText = "ej: 9999"
-ValueBox.TextColor3 = Color3.fromRGB(255,255,255)
-ValueBox.PlaceholderColor3 = Color3.fromRGB(70,70,90)
-ValueBox.TextSize = 13
-ValueBox.Font = Enum.Font.GothamBold
-ValueBox.BorderSizePixel = 0
-ValueBox.ClearTextOnFocus = false
-Instance.new("UICorner", ValueBox).CornerRadius = UDim.new(0,8)
-local VStroke = Instance.new("UIStroke", ValueBox)
-VStroke.Color = Color3.fromRGB(50,50,70); VStroke.Thickness = 1
-ValueBox.Focused:Connect(function() VStroke.Color = Color3.fromRGB(30,215,96) end)
-ValueBox.FocusLost:Connect(function() VStroke.Color = Color3.fromRGB(50,50,70) end)
-local VPad = Instance.new("UIPadding", ValueBox); VPad.PaddingLeft = UDim.new(0,8)
-
--- Botón ENVIAR
+-- ── Botón enviar ─────────────────────────
 local SendBtn = Instance.new("TextButton", Frame)
-SendBtn.Size = UDim2.new(1,-24,0,34)
-SendBtn.Position = UDim2.new(0,12,0,394)
+SendBtn.Size = UDim2.new(1,-24,0,36)
+SendBtn.Position = UDim2.new(0,12,0,278)
 SendBtn.BackgroundColor3 = Color3.fromRGB(20,150,60)
-SendBtn.Text = "🚀  ENVIAR AL REMOTE"
+SendBtn.Text = "🚀  ENVIAR  (auto-busca el remote)"
 SendBtn.TextColor3 = Color3.fromRGB(255,255,255)
-SendBtn.TextSize = 13
-SendBtn.Font = Enum.Font.GothamBold
+SendBtn.TextSize = 12; SendBtn.Font = Enum.Font.GothamBold
 SendBtn.BorderSizePixel = 0
 Instance.new("UICorner", SendBtn).CornerRadius = UDim.new(0,10)
 
--- Status
+-- ── Barra de progreso ────────────────────
+local ProgBg = Instance.new("Frame", Frame)
+ProgBg.Size = UDim2.new(1,-24,0,6)
+ProgBg.Position = UDim2.new(0,12,0,320)
+ProgBg.BackgroundColor3 = Color3.fromRGB(25,25,35)
+ProgBg.BorderSizePixel = 0
+Instance.new("UICorner", ProgBg).CornerRadius = UDim.new(1,0)
+
+local ProgFill = Instance.new("Frame", ProgBg)
+ProgFill.Size = UDim2.new(0,0,1,0)
+ProgFill.BackgroundColor3 = Color3.fromRGB(30,215,96)
+ProgFill.BorderSizePixel = 0
+Instance.new("UICorner", ProgFill).CornerRadius = UDim.new(1,0)
+
+-- ── Status ───────────────────────────────
 local StatusLabel = Instance.new("TextLabel", Frame)
 StatusLabel.Size = UDim2.new(1,-24,0,16)
-StatusLabel.Position = UDim2.new(0,12,0,434)
+StatusLabel.Position = UDim2.new(0,12,0,330)
 StatusLabel.BackgroundTransparency = 1
-StatusLabel.Text = ""
-StatusLabel.TextColor3 = Color3.fromRGB(30,215,96)
-StatusLabel.TextSize = 9
-StatusLabel.Font = Enum.Font.Gotham
+StatusLabel.Text = "Listo"
+StatusLabel.TextColor3 = Color3.fromRGB(80,80,100)
+StatusLabel.TextSize = 9; StatusLabel.Font = Enum.Font.Gotham
 StatusLabel.TextXAlignment = Enum.TextXAlignment.Left
 StatusLabel.TextTruncate = Enum.TextTruncate.AtEnd
 
+-- Remote encontrado
+local RemoteFoundLabel = Instance.new("TextLabel", Frame)
+RemoteFoundLabel.Size = UDim2.new(1,-24,0,14)
+RemoteFoundLabel.Position = UDim2.new(0,12,0,348)
+RemoteFoundLabel.BackgroundTransparency = 1
+RemoteFoundLabel.Text = ""
+RemoteFoundLabel.TextColor3 = Color3.fromRGB(80,180,255)
+RemoteFoundLabel.TextSize = 8; RemoteFoundLabel.Font = Enum.Font.Gotham
+RemoteFoundLabel.TextXAlignment = Enum.TextXAlignment.Left
+RemoteFoundLabel.TextTruncate = Enum.TextTruncate.AtEnd
+
 local function setStatus(msg, color)
 	StatusLabel.Text = msg
-	StatusLabel.TextColor3 = color or Color3.fromRGB(30,215,96)
+	StatusLabel.TextColor3 = color or Color3.fromRGB(80,80,100)
 end
 
 -- ══════════════════════════════════════════
---  ESTADO
+--  ESTADO + DRAG
 -- ══════════════════════════════════════════
 local selectedPlayer = nil
-local selectedRemote = nil
 local playerButtons  = {}
-local remoteButtons  = {}
+local isSending      = false
 
--- ── Drag ─────────────────────────────────
 local dragging, dragStart, startPos = false, nil, nil
 Header.InputBegan:Connect(function(i)
 	if i.UserInputType == Enum.UserInputType.MouseButton1
@@ -277,11 +298,10 @@ UIS.InputEnded:Connect(function(i)
 	or i.UserInputType == Enum.UserInputType.Touch then dragging = false end
 end)
 
--- ── Poblar jugadores ─────────────────────
+-- ── Jugadores ────────────────────────────
 local function refreshPlayers()
 	for _, b in pairs(playerButtons) do b:Destroy() end
-	playerButtons = {}
-	selectedPlayer = nil
+	playerButtons = {}; selectedPlayer = nil
 
 	for _, plr in ipairs(Players:GetPlayers()) do
 		local btn = Instance.new("TextButton")
@@ -289,11 +309,9 @@ local function refreshPlayers()
 		btn.BackgroundColor3 = Color3.fromRGB(28,28,40)
 		btn.Text = "👤  " .. plr.Name
 		btn.TextColor3 = Color3.fromRGB(210,210,210)
-		btn.TextSize = 11
-		btn.Font = Enum.Font.Gotham
+		btn.TextSize = 11; btn.Font = Enum.Font.Gotham
 		btn.TextXAlignment = Enum.TextXAlignment.Left
-		btn.BorderSizePixel = 0
-		btn.Parent = PlayerScroll
+		btn.BorderSizePixel = 0; btn.Parent = PlayerScroll
 		Instance.new("UICorner", btn).CornerRadius = UDim.new(0,6)
 		local p = Instance.new("UIPadding", btn); p.PaddingLeft = UDim.new(0,8)
 		playerButtons[plr.Name] = btn
@@ -306,156 +324,86 @@ local function refreshPlayers()
 			btn.BackgroundColor3 = Color3.fromRGB(18,50,26)
 			btn.TextColor3 = Color3.fromRGB(30,215,96)
 			selectedPlayer = plr
-			setStatus("Jugador: " .. plr.Name)
-			-- Auto-llena el nombre del stat con el primero que encuentre
+			setStatus("Jugador: " .. plr.Name, Color3.fromRGB(30,215,96))
+			-- Auto-llena stat si está vacío
 			local ls = plr:FindFirstChild("leaderstats")
 			if ls then
 				local first = ls:GetChildren()[1]
-				if first and StatNameBox.Text == "" then
-					StatNameBox.Text = first.Name
-				end
+				if first and StatBox.Text == "" then StatBox.Text = first.Name end
 			end
 		end)
 	end
 end
 
--- ── Poblar remotes ───────────────────────
-local function refreshRemotes()
-	for _, b in ipairs(remoteButtons) do
-		if b and b.Parent then b:Destroy() end
-	end
-	remoteButtons  = {}
-	selectedRemote = nil
-	SelectedRemoteLabel.Text = "Ningún remote seleccionado"
-	SelectedRemoteLabel.TextColor3 = Color3.fromRGB(100,100,120)
-
-	local remotes = scanAllRemotes()
-	if #remotes == 0 then
-		local lbl = Instance.new("TextLabel", RemoteScroll)
-		lbl.Size = UDim2.new(1,0,0,24)
-		lbl.BackgroundTransparency = 1
-		lbl.Text = "  No se encontraron remotes"
-		lbl.TextColor3 = Color3.fromRGB(100,100,120)
-		lbl.TextSize = 10
-		lbl.Font = Enum.Font.Gotham
-		lbl.TextXAlignment = Enum.TextXAlignment.Left
-		table.insert(remoteButtons, lbl)
-		setStatus("Sin remotes encontrados", Color3.fromRGB(255,100,100))
-		return
-	end
-
-	setStatus("🔎 " .. #remotes .. " remote(s) encontrado(s)")
-
-	for i, remote in ipairs(remotes) do
-		local isEvent = remote:IsA("RemoteEvent")
-		local btn = Instance.new("TextButton")
-		btn.Size = UDim2.new(1,0,0,24)
-		btn.BackgroundColor3 = Color3.fromRGB(22,28,40)
-		btn.Text = (isEvent and "📡 " or "⚙️ ") .. remote:GetFullName()
-		btn.TextColor3 = Color3.fromRGB(160,200,255)
-		btn.TextSize = 9
-		btn.Font = Enum.Font.Gotham
-		btn.TextXAlignment = Enum.TextXAlignment.Left
-		btn.BorderSizePixel = 0
-		btn.LayoutOrder = i
-		btn.Parent = RemoteScroll
-		Instance.new("UICorner", btn).CornerRadius = UDim.new(0,6)
-		local p = Instance.new("UIPadding", btn); p.PaddingLeft = UDim.new(0,8)
-		table.insert(remoteButtons, btn)
-
-		btn.MouseButton1Click:Connect(function()
-			for _, b in ipairs(remoteButtons) do
-				if b:IsA("TextButton") then
-					b.BackgroundColor3 = Color3.fromRGB(22,28,40)
-					b.TextColor3 = Color3.fromRGB(160,200,255)
-				end
-			end
-			btn.BackgroundColor3 = Color3.fromRGB(18,40,70)
-			btn.TextColor3 = Color3.fromRGB(80,180,255)
-			selectedRemote = remote
-			SelectedRemoteLabel.Text = "✅ " .. remote:GetFullName()
-			SelectedRemoteLabel.TextColor3 = Color3.fromRGB(80,180,255)
-			setStatus("Remote: " .. remote.Name)
-		end)
-	end
-end
+RefreshBtn.MouseButton1Click:Connect(refreshPlayers)
 
 -- ── ENVIAR ───────────────────────────────
 SendBtn.MouseButton1Click:Connect(function()
+	if isSending then return end
+
 	if not selectedPlayer then
-		setStatus("⚠️ Selecciona un jugador primero", Color3.fromRGB(255,200,50)); return
+		setStatus("⚠️ Selecciona un jugador", Color3.fromRGB(255,200,50)); return
 	end
-	if not selectedRemote or not selectedRemote.Parent then
-		setStatus("⚠️ Selecciona un remote primero", Color3.fromRGB(255,200,50)); return
-	end
-	if StatNameBox.Text == "" then
+	if StatBox.Text == "" then
 		setStatus("⚠️ Escribe el nombre del stat", Color3.fromRGB(255,200,50)); return
 	end
-	if ValueBox.Text == "" then
+	if ValBox.Text == "" then
 		setStatus("⚠️ Escribe el valor", Color3.fromRGB(255,200,50)); return
 	end
 
-	local statName = StatNameBox.Text
-	local rawVal   = ValueBox.Text
+	isSending = true
+	SendBtn.Text = "⏳  Buscando remote..."
+	SendBtn.BackgroundColor3 = Color3.fromRGB(60,60,20)
+	ProgFill.Size = UDim2.new(0,0,1,0)
+	RemoteFoundLabel.Text = ""
+
+	local statName = StatBox.Text
+	local rawVal   = ValBox.Text
 	local numVal   = tonumber(rawVal)
 	local finalVal = numVal or rawVal
 
-	local isEvent = selectedRemote:IsA("RemoteEvent")
-
-	-- Todos los formatos posibles que usan los juegos
-	local formats = {
-		{selectedPlayer.Name, statName, finalVal},
-		{selectedPlayer,      statName, finalVal},
-		{statName,            finalVal},
-		{selectedPlayer.UserId, statName, finalVal},
-		{selectedPlayer.Name, statName, rawVal},
-		{selectedPlayer,      statName, rawVal},
-		{statName,            rawVal},
-		{selectedPlayer.Name, finalVal},
-		{selectedPlayer,      finalVal},
-	}
-
-	local success = false
-	local usedFmt = 0
-
-	for i, args in ipairs(formats) do
-		local ok = pcall(function()
-			if isEvent then
-				selectedRemote:FireServer(table.unpack(args))
-			else
-				selectedRemote:InvokeServer(table.unpack(args))
+	task.spawn(function()
+		local ok, result = autoFire(
+			selectedPlayer, statName, finalVal, rawVal,
+			function(tried, total, remoteName)
+				-- actualiza progreso en cada intento
+				local pct = tried / total
+				ProgFill.Size = UDim2.new(pct, 0, 1, 0)
+				setStatus("🔎 Probando: " .. remoteName, Color3.fromRGB(150,150,80))
 			end
-		end)
-		if ok then
-			success = true
-			usedFmt = i
-			break
-		end
-	end
+		)
 
-	if success then
-		SendBtn.BackgroundColor3 = Color3.fromRGB(10,120,40)
-		setStatus("✅ Enviado → " .. statName .. " = " .. tostring(finalVal), Color3.fromRGB(30,215,96))
-		task.delay(1.2, function() SendBtn.BackgroundColor3 = Color3.fromRGB(20,150,60) end)
-	else
-		SendBtn.BackgroundColor3 = Color3.fromRGB(120,20,20)
-		setStatus("❌ Este remote no aceptó ningún formato", Color3.fromRGB(255,80,80))
-		task.delay(1.2, function() SendBtn.BackgroundColor3 = Color3.fromRGB(20,150,60) end)
-	end
+		ProgFill.Size = UDim2.new(1,0,1,0)
+
+		if ok then
+			SendBtn.Text = "✅  ENVIADO"
+			SendBtn.BackgroundColor3 = Color3.fromRGB(10,130,45)
+			setStatus("✅ " .. statName .. " = " .. tostring(finalVal), Color3.fromRGB(30,215,96))
+			RemoteFoundLabel.Text = "🌐 " .. result
+			ProgFill.BackgroundColor3 = Color3.fromRGB(30,215,96)
+		else
+			SendBtn.Text = "❌  Sin remote válido"
+			SendBtn.BackgroundColor3 = Color3.fromRGB(130,20,20)
+			setStatus("❌ " .. result, Color3.fromRGB(255,80,80))
+			ProgFill.BackgroundColor3 = Color3.fromRGB(200,50,50)
+		end
+
+		task.wait(2)
+		SendBtn.Text = "🚀  ENVIAR  (auto-busca el remote)"
+		SendBtn.BackgroundColor3 = Color3.fromRGB(20,150,60)
+		ProgFill.BackgroundColor3 = Color3.fromRGB(30,215,96)
+		ProgFill.Size = UDim2.new(0,0,1,0)
+		isSending = false
+	end)
 end)
 
 -- ── Toggle / Close ───────────────────────
-ScanBtn.MouseButton1Click:Connect(refreshRemotes)
-
 local open = false
 ToggleBtn.MouseButton1Click:Connect(function()
 	open = not open
 	Frame.Visible = open
 	ToggleBtn.BackgroundColor3 = open and Color3.fromRGB(18,160,65) or Color3.fromRGB(30,215,96)
-	if open then
-		refreshPlayers()
-		refreshRemotes()
-	end
+	if open then refreshPlayers() end
 end)
 CloseBtn.MouseButton1Click:Connect(function()
 	open = false; Frame.Visible = false
@@ -466,4 +414,4 @@ ToggleBtn.MouseLeave:Connect(function()
 	ToggleBtn.BackgroundColor3 = open and Color3.fromRGB(18,160,65) or Color3.fromRGB(30,215,96)
 end)
 
-print("[LeaderstatsEditor] Listo ✓")
+print("[LeaderstatsEditor] Listo ✓ — Auto-remote activo")
