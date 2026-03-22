@@ -1,11 +1,15 @@
 -- ============================================
--- LocalScript: Dar 30 Wins
--- Ubicación: StarterPlayerScripts
+-- Script para Ejecutador: Dar 30 Wins
+-- Pega y ejecuta directo en el ejecutador
 -- ============================================
 local Players = game:GetService("Players")
 local TweenService = game:GetService("TweenService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local player = Players.LocalPlayer
+
+-- Eliminar GUI anterior si ya existe (para re-ejecuciones)
+local existente = player.PlayerGui:FindFirstChild("WinsGui")
+if existente then existente:Destroy() end
 
 -- ============================================
 -- CREAR LA GUI
@@ -16,11 +20,11 @@ screenGui.ResetOnSpawn = false
 screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 screenGui.Parent = player.PlayerGui
 
--- TEXTO DE ESTADO (encima del botón, siempre en el ScreenGui)
+-- TEXTO DE ESTADO (encima del botón)
 local statusLabel = Instance.new("TextLabel")
 statusLabel.Name = "StatusLabel"
 statusLabel.Size = UDim2.new(0, 260, 0, 44)
-statusLabel.Position = UDim2.new(0.5, -130, 0.85, -100) -- justo encima del botón
+statusLabel.Position = UDim2.new(0.5, -130, 0.85, -100)
 statusLabel.BackgroundColor3 = Color3.fromRGB(20, 20, 30)
 statusLabel.BackgroundTransparency = 0
 statusLabel.BorderSizePixel = 0
@@ -28,7 +32,7 @@ statusLabel.Text = ""
 statusLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
 statusLabel.TextSize = 15
 statusLabel.Font = Enum.Font.GothamBold
-statusLabel.Visible = false -- oculto al inicio
+statusLabel.Visible = false
 statusLabel.ZIndex = 20
 statusLabel.Parent = screenGui
 
@@ -109,14 +113,11 @@ end)
 local statusThread = nil
 
 local function mostrarEstado(texto, color, strokeColor)
-	-- Cancelar hilo anterior si existe
 	if statusThread then
 		task.cancel(statusThread)
 		statusThread = nil
 	end
-
 	statusStroke.Color = strokeColor or color
-	statusLabel.BackgroundColor3 = Color3.fromRGB(20, 20, 30)
 	statusLabel.TextColor3 = color
 	statusLabel.Text = texto
 	statusLabel.TextTransparency = 0
@@ -133,16 +134,17 @@ local function mostrarEstado(texto, color, strokeColor)
 end
 
 -- ============================================
--- LÓGICA: DAR 30 WINS AL HACER CLIC via UpdateSpeed
+-- LÓGICA: DAR 30 WINS AL HACER CLIC
 -- ============================================
-local UpdateSpeed = ReplicatedStorage:WaitForChild("UpdateSpeed", 10)
+local UpdateSpeed = ReplicatedStorage:FindFirstChild("UpdateSpeed")
 
 button.MouseButton1Click:Connect(function()
-	-- Verificar que el RemoteEvent existe
+	-- Verificar RemoteEvent
+	UpdateSpeed = ReplicatedStorage:FindFirstChild("UpdateSpeed")
 	if not UpdateSpeed then
-		button.Text = "❌  Error"
+		button.Text = "❌  Sin Remote"
 		button.BackgroundColor3 = Color3.fromRGB(220, 60, 60)
-		mostrarEstado("❌ RemoteEvent 'UpdateSpeed' no encontrado", Color3.fromRGB(220, 80, 80), Color3.fromRGB(220, 80, 80))
+		mostrarEstado("❌ 'UpdateSpeed' no existe en ReplicatedStorage", Color3.fromRGB(220, 80, 80), Color3.fromRGB(220, 80, 80))
 		task.wait(2)
 		button.Text = "🏆  +30 Wins"
 		button.BackgroundColor3 = Color3.fromRGB(255, 200, 0)
@@ -150,60 +152,68 @@ button.MouseButton1Click:Connect(function()
 	end
 
 	local leaderstats = player:FindFirstChild("leaderstats")
-	if leaderstats then
-		local wins = leaderstats:FindFirstChild("Wins")
-		if wins then
-			-- Disparar el remote y esperar respuesta con timeout
-			local respondio = false
-
-			-- Escuchar respuesta del servidor (necesita OnClientEvent en el servidor)
-			local conn
-			conn = UpdateSpeed.OnClientEvent:Connect(function(resultado)
-				respondio = true
-				conn:Disconnect()
-				if resultado == true then
-					button.Text = "✅  ¡+30 Wins!"
-					button.BackgroundColor3 = Color3.fromRGB(80, 220, 100)
-					mostrarEstado("✅ ¡Funcionó! Se añadieron 30 Wins", Color3.fromRGB(80, 220, 100), Color3.fromRGB(60, 180, 80))
-				else
-					button.Text = "❌  Falló"
-					button.BackgroundColor3 = Color3.fromRGB(220, 60, 60)
-					mostrarEstado("❌ El servidor no pudo añadir los Wins", Color3.fromRGB(220, 80, 80), Color3.fromRGB(220, 80, 80))
-				end
-				task.wait(1.5)
-				button.Text = "🏆  +30 Wins"
-				button.BackgroundColor3 = Color3.fromRGB(255, 200, 0)
-			end)
-
-			UpdateSpeed:FireServer("Wins", 30)
-			mostrarEstado("⏳ Enviando al servidor...", Color3.fromRGB(255, 200, 0), Color3.fromRGB(200, 160, 0))
-
-			-- Timeout de 5 segundos: si el servidor no responde
-			task.delay(5, function()
-				if not respondio then
-					conn:Disconnect()
-					button.Text = "⚠️  Sin respuesta"
-					button.BackgroundColor3 = Color3.fromRGB(200, 120, 0)
-					mostrarEstado("⚠️ El RemoteEvent no respondió (timeout)", Color3.fromRGB(255, 160, 0), Color3.fromRGB(200, 120, 0))
-					task.wait(2)
-					button.Text = "🏆  +30 Wins"
-					button.BackgroundColor3 = Color3.fromRGB(255, 200, 0)
-				end
-			end)
-		else
-			button.Text = "❌  Error"
-			button.BackgroundColor3 = Color3.fromRGB(220, 60, 60)
-			mostrarEstado("❌ No se encontró el stat 'Wins'", Color3.fromRGB(220, 80, 80), Color3.fromRGB(220, 80, 80))
-			task.wait(2)
-			button.Text = "🏆  +30 Wins"
-			button.BackgroundColor3 = Color3.fromRGB(255, 200, 0)
-		end
-	else
+	if not leaderstats then
 		button.Text = "❌  Error"
 		button.BackgroundColor3 = Color3.fromRGB(220, 60, 60)
 		mostrarEstado("❌ No existe leaderstats en el jugador", Color3.fromRGB(220, 80, 80), Color3.fromRGB(220, 80, 80))
 		task.wait(2)
 		button.Text = "🏆  +30 Wins"
 		button.BackgroundColor3 = Color3.fromRGB(255, 200, 0)
+		return
 	end
+
+	local wins = leaderstats:FindFirstChild("Wins")
+	if not wins then
+		button.Text = "❌  Error"
+		button.BackgroundColor3 = Color3.fromRGB(220, 60, 60)
+		mostrarEstado("❌ No se encontró el stat 'Wins'", Color3.fromRGB(220, 80, 80), Color3.fromRGB(220, 80, 80))
+		task.wait(2)
+		button.Text = "🏆  +30 Wins"
+		button.BackgroundColor3 = Color3.fromRGB(255, 200, 0)
+		return
+	end
+
+	-- Todo existe: disparar remote
+	mostrarEstado("⏳ Enviando al servidor...", Color3.fromRGB(255, 200, 0), Color3.fromRGB(200, 160, 0))
+
+	local respondio = false
+	local conn
+	conn = UpdateSpeed.OnClientEvent:Connect(function(resultado)
+		respondio = true
+		conn:Disconnect()
+		if resultado == true then
+			button.Text = "✅  ¡+30 Wins!"
+			button.BackgroundColor3 = Color3.fromRGB(80, 220, 100)
+			mostrarEstado("✅ ¡Funcionó! Se añadieron 30 Wins", Color3.fromRGB(80, 220, 100), Color3.fromRGB(60, 180, 80))
+		else
+			button.Text = "❌  Falló"
+			button.BackgroundColor3 = Color3.fromRGB(220, 60, 60)
+			mostrarEstado("❌ El servidor rechazó la petición", Color3.fromRGB(220, 80, 80), Color3.fromRGB(220, 80, 80))
+		end
+		task.wait(1.5)
+		button.Text = "🏆  +30 Wins"
+		button.BackgroundColor3 = Color3.fromRGB(255, 200, 0)
+	end)
+
+	UpdateSpeed:FireServer("Wins", 30)
+
+	-- Timeout 5 segundos
+	task.delay(5, function()
+		if not respondio then
+			conn:Disconnect()
+			-- Igual intentar leer el valor local como fallback
+			if wins.Value > 0 then
+				button.Text = "⚠️  Sin respuesta"
+				button.BackgroundColor3 = Color3.fromRGB(200, 120, 0)
+				mostrarEstado("⚠️ Remote sin respuesta (puede haber funcionado)", Color3.fromRGB(255, 160, 0), Color3.fromRGB(200, 120, 0))
+			else
+				button.Text = "⚠️  Timeout"
+				button.BackgroundColor3 = Color3.fromRGB(200, 120, 0)
+				mostrarEstado("⚠️ El RemoteEvent no respondió (timeout)", Color3.fromRGB(255, 160, 0), Color3.fromRGB(200, 120, 0))
+			end
+			task.wait(2)
+			button.Text = "🏆  +30 Wins"
+			button.BackgroundColor3 = Color3.fromRGB(255, 200, 0)
+		end
+	end)
 end)
