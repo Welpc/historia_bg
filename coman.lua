@@ -1,306 +1,410 @@
--- SuperPoderes MOVIL v3 - LocalScript
--- Coloca en: StarterPlayer > StarterPlayerScripts
+-- ============================================================
+--  BuyCandyEvent_Checker_v2.lua
+--  Ejecuta el remote y muestra en pantalla qué pasó exactamente
+-- ============================================================
 
-local Players          = game:GetService("Players")
-local RunService       = game:GetService("RunService")
-local TweenService     = game:GetService("TweenService")
-local UserInputService = game:GetService("UserInputService")
+local Players     = game:GetService("Players")
+local localPlayer = Players.LocalPlayer
+local playerGui   = localPlayer:WaitForChild("PlayerGui")
 
-local player = Players.LocalPlayer
-local camera = workspace.CurrentCamera
-
-local FLIGHT_SPEED = 60
-local WALK_SPEED   = 55
-local HIT_RADIUS   = 18
-local HIT_FORCE    = 220
-local HIT_CD       = 0.5
-
-local flying     = false
-local speedOn    = false
-local lastHit    = 0
-local bv, bg     = nil, nil
-
-local function getChar()  return player.Character or player.CharacterAdded:Wait() end
-local function getHRP()   local c = getChar(); return c and c:FindFirstChild("HumanoidRootPart") end
-local function getHuman() local c = getChar(); return c and c:FindFirstChildOfClass("Humanoid") end
-
--- ══════════════════════════════════════
--- GUI
--- ══════════════════════════════════════
-local gui = Instance.new("ScreenGui")
-gui.Name           = "SPv3"
-gui.ResetOnSpawn   = false
-gui.IgnoreGuiInset = true
-gui.Parent         = player.PlayerGui
-
--- Notif
-local notif = Instance.new("TextLabel")
-notif.Size                   = UDim2.new(0.6, 0, 0, 34)
-notif.Position               = UDim2.new(0.2, 0, 0, 8)
-notif.BackgroundColor3       = Color3.fromRGB(15,15,15)
-notif.BackgroundTransparency = 0.25
-notif.TextColor3             = Color3.fromRGB(255,220,50)
-notif.Font                   = Enum.Font.GothamBold
-notif.TextSize               = 13
-notif.Text                   = "✅ Poderes listos"
-notif.TextWrapped            = true
-notif.ZIndex                 = 10
-notif.Parent                 = gui
-Instance.new("UICorner", notif).CornerRadius = UDim.new(0,8)
-
-local function notify(msg, col)
-    notif.Text = msg
-    notif.TextColor3 = col or Color3.fromRGB(255,220,50)
-    notif.TextTransparency = 0
-    TweenService:Create(notif, TweenInfo.new(2.5, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {TextTransparency=1}):Play()
+if playerGui:FindFirstChild("CheckerUI") then
+	playerGui.CheckerUI:Destroy()
 end
 
--- Botones pequeños apilados en esquina derecha
-local COL_VOLAR_OFF = Color3.fromRGB(30,80,210)
-local COL_SPEED_OFF = Color3.fromRGB(130,20,200)
-local COL_GOLPE     = Color3.fromRGB(200,45,25)
-local COL_ON        = Color3.fromRGB(20,170,70)
+local C = {
+	bg     = Color3.fromRGB(12, 12, 18),
+	panel  = Color3.fromRGB(20, 20, 30),
+	card   = Color3.fromRGB(28, 28, 40),
+	header = Color3.fromRGB(16, 16, 26),
+	border = Color3.fromRGB(50, 50, 75),
+	text   = Color3.fromRGB(225, 225, 240),
+	muted  = Color3.fromRGB(140, 140, 170),
+	dim    = Color3.fromRGB(80, 80, 110),
+	green  = Color3.fromRGB(60, 200, 110),
+	red    = Color3.fromRGB(220, 60, 60),
+	yellow = Color3.fromRGB(210, 170, 30),
+	blue   = Color3.fromRGB(60, 130, 220),
+	white  = Color3.fromRGB(255, 255, 255),
+}
 
-local function makeBtn(txt, col, yPos)
-    local b = Instance.new("TextButton")
-    b.Size                   = UDim2.new(0, 100, 0, 42)
-    b.Position               = UDim2.new(1, -108, 0, yPos)
-    b.BackgroundColor3       = col
-    b.TextColor3             = Color3.fromRGB(255,255,255)
-    b.Font                   = Enum.Font.GothamBold
-    b.TextSize               = 13
-    b.Text                   = txt
-    b.AutoButtonColor        = false
-    b.ZIndex                 = 5
-    b.Parent                 = gui
-    Instance.new("UICorner", b).CornerRadius = UDim.new(0,10)
-    local st = Instance.new("UIStroke")
-    st.Thickness = 1.5; st.Color = Color3.fromRGB(255,255,255); st.Transparency = 0.65; st.Parent = b
-    return b
+local function corner(p, r)
+	Instance.new("UICorner", p).CornerRadius = UDim.new(0, r or 8)
+end
+local function stroke(p, col, t)
+	local s = Instance.new("UIStroke", p)
+	s.Color = col or C.border s.Thickness = t or 1
+end
+local function mkLabel(parent, props)
+	local l = Instance.new("TextLabel", parent)
+	l.BackgroundTransparency = 1
+	l.Font = props.font or Enum.Font.Gotham
+	l.TextSize = props.size or 12
+	l.TextColor3 = props.color or C.text
+	l.Text = props.text or ""
+	l.TextXAlignment = props.xa or Enum.TextXAlignment.Left
+	l.TextYAlignment = props.ya or Enum.TextYAlignment.Center
+	l.TextWrapped = props.wrap or false
+	l.TextTruncate = props.trunc or Enum.TextTruncate.None
+	l.Size = props.sz or UDim2.new(1, 0, 0, 20)
+	l.Position = props.pos or UDim2.new(0, 0, 0, 0)
+	l.ZIndex = props.z or 2
+	return l
 end
 
-local btnVolar = makeBtn("🛸 VOLAR\nOFF", COL_VOLAR_OFF, 90)
-local btnSpeed = makeBtn("⚡ SPEED\nOFF", COL_SPEED_OFF, 143)
-local btnGolpe = makeBtn("💥 GOLPE", COL_GOLPE, 196)
+-- ScreenGui
+local sg = Instance.new("ScreenGui")
+sg.Name = "CheckerUI"
+sg.ResetOnSpawn = false
+sg.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+sg.IgnoreGuiInset = true
+sg.Parent = playerGui
 
--- ══════════════════════════════════════
--- VUELO (usando AlignPosition + AlignOrientation — más confiable)
--- ══════════════════════════════════════
-local alignPos, alignOri
+-- Panel principal
+local main = Instance.new("Frame", sg)
+main.Size = UDim2.new(0, 400, 0, 540)
+main.Position = UDim2.new(0.5, -200, 0.5, -270)
+main.BackgroundColor3 = C.bg
+main.BorderSizePixel = 0
+main.Active = true
+main.Draggable = true
+main.ZIndex = 5
+corner(main, 12)
+stroke(main, C.border, 1.5)
 
-local function enableFlight()
-    local hrp   = getHRP()
-    local human = getHuman()
-    if not hrp or not human then return end
+-- Header
+local hdr = Instance.new("Frame", main)
+hdr.Size = UDim2.new(1, 0, 0, 40)
+hdr.BackgroundColor3 = C.header
+hdr.BorderSizePixel = 0
+hdr.ZIndex = 6
+corner(hdr, 12)
+local hdrPatch = Instance.new("Frame", hdr)
+hdrPatch.Size = UDim2.new(1, 0, 0.5, 0)
+hdrPatch.Position = UDim2.new(0, 0, 0.5, 0)
+hdrPatch.BackgroundColor3 = C.header
+hdrPatch.BorderSizePixel = 0 hdrPatch.ZIndex = 6
 
-    -- Quitar gravedad
-    human.PlatformStand = true
+mkLabel(hdr, {
+	text = "BuyCandyEvent — Checker",
+	font = Enum.Font.GothamBold, size = 13, color = C.text,
+	sz = UDim2.new(1, -46, 1, 0), pos = UDim2.new(0, 12, 0, 0), z = 7,
+})
 
-    -- BodyVelocity para mover
-    bv = Instance.new("BodyVelocity")
-    bv.Velocity  = Vector3.new(0, 0, 0)
-    bv.MaxForce  = Vector3.new(1e5, 1e5, 1e5)
-    bv.P         = 1e4
-    bv.Parent    = hrp
+local closeBtn = Instance.new("TextButton", hdr)
+closeBtn.Size = UDim2.new(0, 26, 0, 26)
+closeBtn.Position = UDim2.new(1, -34, 0.5, -13)
+closeBtn.BackgroundColor3 = C.red
+closeBtn.Text = "X" closeBtn.TextColor3 = C.white
+closeBtn.TextSize = 11 closeBtn.Font = Enum.Font.GothamBold
+closeBtn.BorderSizePixel = 0 closeBtn.ZIndex = 8
+corner(closeBtn, 6)
+closeBtn.MouseButton1Click:Connect(function() sg:Destroy() end)
 
-    -- BodyGyro para orientación
-    bg = Instance.new("BodyGyro")
-    bg.MaxTorque = Vector3.new(1e5, 1e5, 1e5)
-    bg.P         = 1e4
-    bg.D         = 100
-    bg.CFrame    = hrp.CFrame
-    bg.Parent    = hrp
+-- Stats en tiempo real (arriba)
+local statsFrame = Instance.new("Frame", main)
+statsFrame.Size = UDim2.new(1, -16, 0, 50)
+statsFrame.Position = UDim2.new(0, 8, 0, 48)
+statsFrame.BackgroundColor3 = C.panel
+statsFrame.BorderSizePixel = 0
+statsFrame.ZIndex = 6
+corner(statsFrame, 8)
+stroke(statsFrame, C.border, 1)
+
+mkLabel(statsFrame, {
+	text = "TUS STATS EN TIEMPO REAL",
+	font = Enum.Font.GothamBold, size = 9, color = C.dim,
+	sz = UDim2.new(1, -10, 0, 16), pos = UDim2.new(0, 10, 0, 4), z = 7,
+})
+
+local statsValLabel = mkLabel(statsFrame, {
+	text = "Cargando...",
+	font = Enum.Font.GothamBold, size = 12, color = C.yellow,
+	sz = UDim2.new(1, -10, 0, 22), pos = UDim2.new(0, 10, 0, 22), z = 7,
+	trunc = Enum.TextTruncate.AtEnd,
+})
+
+-- Log de eventos (scroll)
+local scroll = Instance.new("ScrollingFrame", main)
+scroll.Size = UDim2.new(1, -16, 1, -172)
+scroll.Position = UDim2.new(0, 8, 0, 106)
+scroll.BackgroundColor3 = C.panel
+scroll.BorderSizePixel = 0
+scroll.ScrollBarThickness = 4
+scroll.ScrollBarImageColor3 = Color3.fromRGB(70, 70, 110)
+scroll.CanvasSize = UDim2.new(0, 0, 0, 0)
+scroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
+scroll.ZIndex = 6
+corner(scroll, 8)
+stroke(scroll, C.border, 1)
+
+local layout = Instance.new("UIListLayout", scroll)
+layout.Padding = UDim.new(0, 4)
+layout.SortOrder = Enum.SortOrder.LayoutOrder
+local lpad = Instance.new("UIPadding", scroll)
+lpad.PaddingTop = UDim.new(0,6) lpad.PaddingBottom = UDim.new(0,6)
+lpad.PaddingLeft = UDim.new(0,6) lpad.PaddingRight = UDim.new(0,6)
+
+-- Botones abajo
+local btnFrame = Instance.new("Frame", main)
+btnFrame.Size = UDim2.new(1, -16, 0, 56)
+btnFrame.Position = UDim2.new(0, 8, 1, -62)
+btnFrame.BackgroundTransparency = 1
+btnFrame.ZIndex = 6
+
+local ejecutarBtn = Instance.new("TextButton", btnFrame)
+ejecutarBtn.Size = UDim2.new(0.48, 0, 0, 26)
+ejecutarBtn.Position = UDim2.new(0, 0, 0, 0)
+ejecutarBtn.BackgroundColor3 = Color3.fromRGB(70, 100, 210)
+ejecutarBtn.Text = "Ejecutar 1 vez"
+ejecutarBtn.TextColor3 = C.white
+ejecutarBtn.TextSize = 11
+ejecutarBtn.Font = Enum.Font.GothamBold
+ejecutarBtn.BorderSizePixel = 0
+ejecutarBtn.ZIndex = 7
+corner(ejecutarBtn, 6)
+
+local loopBtn = Instance.new("TextButton", btnFrame)
+loopBtn.Size = UDim2.new(0.48, 0, 0, 26)
+loopBtn.Position = UDim2.new(0.52, 0, 0, 0)
+loopBtn.BackgroundColor3 = Color3.fromRGB(160, 50, 50)
+loopBtn.Text = "Loop x10"
+loopBtn.TextColor3 = C.white
+loopBtn.TextSize = 11
+loopBtn.Font = Enum.Font.GothamBold
+loopBtn.BorderSizePixel = 0
+loopBtn.ZIndex = 7
+corner(loopBtn, 6)
+
+local limpiarBtn = Instance.new("TextButton", btnFrame)
+limpiarBtn.Size = UDim2.new(1, 0, 0, 24)
+limpiarBtn.Position = UDim2.new(0, 0, 0, 30)
+limpiarBtn.BackgroundColor3 = Color3.fromRGB(30, 30, 45)
+limpiarBtn.Text = "Limpiar log"
+limpiarBtn.TextColor3 = C.dim
+limpiarBtn.TextSize = 10
+limpiarBtn.Font = Enum.Font.Gotham
+limpiarBtn.BorderSizePixel = 0
+limpiarBtn.ZIndex = 7
+corner(limpiarBtn, 6)
+stroke(limpiarBtn, C.border, 1)
+
+-- ----------------------------------------------------------------
+-- Funciones de log
+-- ----------------------------------------------------------------
+local logOrden = 0
+
+local function addLog(texto, color, bg)
+	logOrden = logOrden + 1
+	local row = Instance.new("Frame", scroll)
+	row.Size = UDim2.new(1, 0, 0, 28)
+	row.BackgroundColor3 = bg or C.card
+	row.BorderSizePixel = 0
+	row.LayoutOrder = logOrden
+	row.ZIndex = 7
+	corner(row, 5)
+
+	mkLabel(row, {
+		text = texto,
+		font = Enum.Font.GothamBold, size = 10,
+		color = color or C.text,
+		sz = UDim2.new(1, -16, 1, 0),
+		pos = UDim2.new(0, 10, 0, 0),
+		wrap = false, trunc = Enum.TextTruncate.AtEnd,
+		z = 8,
+	})
+
+	-- Auto scroll al fondo
+	task.wait()
+	scroll.CanvasPosition = Vector2.new(0, math.huge)
 end
 
-local function disableFlight()
-    if bv then bv:Destroy(); bv = nil end
-    if bg then bg:Destroy(); bg = nil end
-    local human = getHuman()
-    if human then
-        human.PlatformStand = false
-    end
+local function addLogSep(texto)
+	logOrden = logOrden + 1
+	local row = Instance.new("Frame", scroll)
+	row.Size = UDim2.new(1, 0, 0, 18)
+	row.BackgroundTransparency = 1
+	row.LayoutOrder = logOrden
+	row.ZIndex = 7
+	mkLabel(row, {
+		text = "— " .. texto .. " —",
+		font = Enum.Font.GothamBold, size = 9, color = C.dim,
+		sz = UDim2.new(1, 0, 1, 0),
+		xa = Enum.TextXAlignment.Center, z = 8,
+	})
 end
 
-local function toggleFlight()
-    flying = not flying
-    if flying then
-        enableFlight()
-        btnVolar.BackgroundColor3 = COL_ON
-        btnVolar.Text             = "🛸 VOLAR\n✅ ON"
-        notify("🛸 Vuelo ON — muévete con joystick", Color3.fromRGB(80,255,160))
-    else
-        disableFlight()
-        btnVolar.BackgroundColor3 = COL_VOLAR_OFF
-        btnVolar.Text             = "🛸 VOLAR\nOFF"
-        notify("🛸 Vuelo OFF")
-    end
+-- ----------------------------------------------------------------
+-- Actualizar stats en tiempo real
+-- ----------------------------------------------------------------
+local function getStatsTexto()
+	local leaderstats = localPlayer:FindFirstChild("leaderstats")
+	if not leaderstats then return "Sin leaderstats" end
+	local partes = {}
+	for _, stat in ipairs(leaderstats:GetChildren()) do
+		table.insert(partes, stat.Name .. ": " .. tostring(stat.Value))
+	end
+	return table.concat(partes, "   |   ")
 end
 
--- ══════════════════════════════════════
--- SPEED
--- ══════════════════════════════════════
-local function toggleSpeed()
-    speedOn = not speedOn
-    local human = getHuman()
-    if human then human.WalkSpeed = speedOn and WALK_SPEED or 16 end
-    if speedOn then
-        btnSpeed.BackgroundColor3 = COL_ON
-        btnSpeed.Text             = "⚡ SPEED\n✅ ON"
-        notify("⚡ Speed ON!", Color3.fromRGB(100,180,255))
-    else
-        btnSpeed.BackgroundColor3 = COL_SPEED_OFF
-        btnSpeed.Text             = "⚡ SPEED\nOFF"
-        notify("⚡ Speed OFF")
-    end
+local function getStatsTabla()
+	local t = {}
+	local leaderstats = localPlayer:FindFirstChild("leaderstats")
+	if leaderstats then
+		for _, stat in ipairs(leaderstats:GetChildren()) do
+			t[stat.Name] = stat.Value
+		end
+	end
+	return t
 end
 
--- ══════════════════════════════════════
--- GOLPE MEJORADO
--- Busca el jugador MÁS CERCANO y lo lanza
--- También hace daño si el juego lo permite
--- ══════════════════════════════════════
-local function superPunch()
-    local now = tick()
-    if now - lastHit < HIT_CD then return end
-    lastHit = now
-
-    local myHRP = getHRP()
-    if not myHRP then return end
-    local myPos = myHRP.Position
-
-    -- Encontrar el jugador más cercano
-    local closest, closestDist, closestHRP = nil, HIT_RADIUS + 1, nil
-
-    for _, other in ipairs(Players:GetPlayers()) do
-        if other ~= player and other.Character then
-            local oHRP = other.Character:FindFirstChild("HumanoidRootPart")
-            if oHRP then
-                local d = (oHRP.Position - myPos).Magnitude
-                if d < closestDist then
-                    closestDist  = d
-                    closest      = other
-                    closestHRP   = oHRP
-                end
-            end
-        end
-    end
-
-    if closest and closestHRP then
-        local oHuman = closest.Character:FindFirstChildOfClass("Humanoid")
-
-        -- Dirección del golpe (hacia arriba y lejos)
-        local dir = (closestHRP.Position - myPos)
-        dir = Vector3.new(dir.X, 0, dir.Z).Unit  -- horizontal primero
-        local launchDir = (dir + Vector3.new(0, 1.2, 0)).Unit  -- arco hacia arriba
-
-        -- Aplicar fuerza fuerte
-        local force = Instance.new("BodyVelocity")
-        force.Velocity  = launchDir * HIT_FORCE
-        force.MaxForce  = Vector3.new(1e7, 1e7, 1e7)
-        force.P         = 1e6
-        force.Parent    = closestHRP
-        game:GetService("Debris"):AddItem(force, 0.2)
-
-        -- Segundo impulso para que vuele bien
-        task.delay(0.15, function()
-            if closestHRP and closestHRP.Parent then
-                local force2 = Instance.new("BodyVelocity")
-                force2.Velocity  = Vector3.new(launchDir.X, 0.5, launchDir.Z) * (HIT_FORCE * 0.5)
-                force2.MaxForce  = Vector3.new(1e7, 1e7, 1e7)
-                force2.P         = 1e6
-                force2.Parent    = closestHRP
-                game:GetService("Debris"):AddItem(force2, 0.15)
-            end
-        end)
-
-        -- Daño si el juego lo permite
-        if oHuman then
-            pcall(function()
-                oHuman:TakeDamage(15)
-            end)
-        end
-
-        -- Flash de pantalla
-        local flash = Instance.new("Frame")
-        flash.Size                   = UDim2.new(1,0,1,0)
-        flash.BackgroundColor3       = Color3.fromRGB(255,60,0)
-        flash.BackgroundTransparency = 0.4
-        flash.ZIndex                 = 20
-        flash.Parent                 = gui
-        TweenService:Create(flash, TweenInfo.new(0.2), {BackgroundTransparency=1}):Play()
-        game:GetService("Debris"):AddItem(flash, 0.25)
-
-        notify("💥 ¡BOOM! " .. closest.Name .. " salió volando!", Color3.fromRGB(255,80,50))
-    else
-        notify("😶 Nadie cerca (radio: " .. HIT_RADIUS .. ")", Color3.fromRGB(180,180,180))
-    end
-end
-
--- ══════════════════════════════════════
--- CONECTAR BOTONES (Activated = funciona en móvil)
--- ══════════════════════════════════════
-btnVolar.Activated:Connect(toggleFlight)
-btnSpeed.Activated:Connect(toggleSpeed)
-btnGolpe.Activated:Connect(superPunch)
-
--- ══════════════════════════════════════
--- LOOP DE VUELO
--- En móvil el joystick mueve al personaje,
--- cuando vuela lo detectamos con MoveDirection
--- ══════════════════════════════════════
-RunService.Heartbeat:Connect(function()
-    if not flying or not bv or not bg then return end
-    local hrp   = getHRP()
-    local human = getHuman()
-    if not hrp then return end
-
-    local move = Vector3.new(0,0,0)
-
-    -- Móvil: usar MoveDirection del humanoid (joystick virtual)
-    if human then
-        local md = human.MoveDirection
-        if md.Magnitude > 0.1 then
-            move = md  -- ya viene normalizado
-        end
-    end
-
-    -- Teclado adicional (para Studio/PC)
-    if UserInputService:IsKeyDown(Enum.KeyCode.W) then move += camera.CFrame.LookVector  end
-    if UserInputService:IsKeyDown(Enum.KeyCode.S) then move -= camera.CFrame.LookVector  end
-    if UserInputService:IsKeyDown(Enum.KeyCode.A) then move -= camera.CFrame.RightVector end
-    if UserInputService:IsKeyDown(Enum.KeyCode.D) then move += camera.CFrame.RightVector end
-    if UserInputService:IsKeyDown(Enum.KeyCode.Q) then move += Vector3.new(0,1,0) end
-    if UserInputService:IsKeyDown(Enum.KeyCode.E) then move -= Vector3.new(0,1,0) end
-
-    -- En móvil mantener altura actual y moverse en XZ
-    local vel = Vector3.new(move.X, move.Y, move.Z)
-    if vel.Magnitude > 0 then vel = vel.Unit end
-    bv.Velocity = vel * FLIGHT_SPEED
-
-    -- Orientar hacia la cámara
-    bg.CFrame = CFrame.new(hrp.Position, hrp.Position + Vector3.new(camera.CFrame.LookVector.X, 0, camera.CFrame.LookVector.Z))
+-- Loop de actualización de stats
+task.spawn(function()
+	while sg.Parent do
+		statsValLabel.Text = getStatsTexto()
+		task.wait(0.5)
+	end
 end)
 
--- ══════════════════════════════════════
--- RESET AL REAPARECER
--- ══════════════════════════════════════
-local function onCharAdded(char)
-    flying = false; speedOn = false; bv = nil; bg = nil
-    btnVolar.BackgroundColor3 = COL_VOLAR_OFF; btnVolar.Text = "🛸 VOLAR\nOFF"
-    btnSpeed.BackgroundColor3 = COL_SPEED_OFF; btnSpeed.Text = "⚡ SPEED\nOFF"
-    notify("🔄 Renaciste — poderes listos!")
+-- ----------------------------------------------------------------
+-- Info inicial
+-- ----------------------------------------------------------------
+local remote = game.ReplicatedStorage:FindFirstChild("BuyCandyEvent")
 
-    local human = char:WaitForChild("Humanoid")
-    if speedOn then human.WalkSpeed = WALK_SPEED end
-
-    human.Died:Connect(function()
-        flying = false; speedOn = false
-        if bv then bv:Destroy(); bv = nil end
-        if bg then bg:Destroy(); bg = nil end
-    end)
+addLogSep("INICIO")
+if remote then
+	addLog("Remote encontrado: " .. remote.ClassName, C.green)
+	addLog("Ruta: " .. remote:GetFullName(), C.muted)
+else
+	addLog("BuyCandyEvent NO existe en ReplicatedStorage", C.red)
 end
+addLog("Stats iniciales: " .. getStatsTexto(), C.yellow)
 
-player.CharacterAdded:Connect(onCharAdded)
-if player.Character then onCharAdded(player.Character) end
+-- ----------------------------------------------------------------
+-- Ejecutar 1 vez
+-- ----------------------------------------------------------------
+ejecutarBtn.MouseButton1Click:Connect(function()
+	if not remote then
+		addLog("ERROR: Remote no encontrado", C.red)
+		return
+	end
 
-print("[SuperPoderes v3 MOVIL] Listo ✅")
+	local antes = getStatsTabla()
+	addLogSep("DISPARO UNICO")
+	addLog("Disparando BuyCandyEvent...", C.muted)
+
+	local ok, err = pcall(function()
+		remote:FireServer()
+	end)
+
+	if not ok then
+		addLog("ERROR al disparar: " .. tostring(err), C.red)
+		return
+	end
+
+	addLog("Remote disparado OK", C.blue)
+	addLog("Esperando respuesta del servidor...", C.muted)
+	task.wait(1.5)
+
+	-- Comparar
+	local despues = getStatsTabla()
+	local huboCambio = false
+
+	for nombre, valAntes in pairs(antes) do
+		local valDespues = despues[nombre] or valAntes
+		local diff = valDespues - valAntes
+		if diff > 0 then
+			huboCambio = true
+			addLog(nombre .. ": " .. valAntes .. " → " .. valDespues .. " (+" .. diff .. ")", C.red)
+		elseif diff < 0 then
+			huboCambio = true
+			addLog(nombre .. ": " .. valAntes .. " → " .. valDespues .. " (" .. diff .. ")", C.yellow)
+		else
+			addLog(nombre .. ": " .. valAntes .. " → sin cambio", C.green)
+		end
+	end
+
+	addLogSep("VEREDICTO")
+	if huboCambio then
+		addLog("VULNERABLE — El remote cambio stats!", C.red, Color3.fromRGB(40, 15, 15))
+	else
+		addLog("SEGURO — No hubo cambios", C.green, Color3.fromRGB(15, 35, 20))
+	end
+end)
+
+-- ----------------------------------------------------------------
+-- Loop x10
+-- ----------------------------------------------------------------
+local loopActivo = false
+
+loopBtn.MouseButton1Click:Connect(function()
+	if not remote then
+		addLog("ERROR: Remote no encontrado", C.red)
+		return
+	end
+
+	if loopActivo then
+		loopActivo = false
+		loopBtn.Text = "Loop x10"
+		loopBtn.BackgroundColor3 = Color3.fromRGB(160, 50, 50)
+		addLog("Loop detenido", C.yellow)
+		return
+	end
+
+	loopActivo = true
+	loopBtn.Text = "DETENER"
+	loopBtn.BackgroundColor3 = Color3.fromRGB(100, 100, 30)
+
+	local antes = getStatsTabla()
+	addLogSep("LOOP x10")
+	addLog("Iniciando loop de 10 disparos...", C.muted)
+
+	task.spawn(function()
+		for i = 1, 10 do
+			if not loopActivo then break end
+			local ok = pcall(function() remote:FireServer() end)
+			addLog("Disparo " .. i .. "/10 — " .. (ok and "OK" or "ERROR"), ok and C.blue or C.red)
+			task.wait(0.3)
+		end
+
+		task.wait(1.5)
+		addLogSep("RESULTADO LOOP")
+
+		local despues = getStatsTabla()
+		local huboCambio = false
+
+		for nombre, valAntes in pairs(antes) do
+			local valDespues = despues[nombre] or valAntes
+			local diff = valDespues - valAntes
+			if diff ~= 0 then
+				huboCambio = true
+				addLog(nombre .. ": " .. valAntes .. " → " .. valDespues ..
+					(diff > 0 and " (+" or " (") .. diff .. ")",
+					diff > 0 and C.red or C.yellow)
+			else
+				addLog(nombre .. ": sin cambio", C.green)
+			end
+		end
+
+		addLogSep("VEREDICTO LOOP")
+		if huboCambio then
+			addLog("VULNERABLE — Stats cambiaron con el loop!", C.red, Color3.fromRGB(40,15,15))
+		else
+			addLog("SEGURO — Ningun cambio detectado", C.green, Color3.fromRGB(15,35,20))
+		end
+
+		loopActivo = false
+		loopBtn.Text = "Loop x10"
+		loopBtn.BackgroundColor3 = Color3.fromRGB(160, 50, 50)
+	end)
+end)
+
+-- Limpiar log
+limpiarBtn.MouseButton1Click:Connect(function()
+	for _, ch in ipairs(scroll:GetChildren()) do
+		if ch:IsA("Frame") then ch:Destroy() end
+	end
+	logOrden = 0
+	addLog("Log limpiado", C.dim)
+end)
+
+print("BuyCandyEvent Checker v2 listo.")
