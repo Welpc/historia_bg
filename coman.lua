@@ -16,7 +16,7 @@ screenGui.Parent = player.PlayerGui
 local frame = Instance.new("Frame")
 frame.Name = "Frame"
 frame.Size = UDim2.new(0, 220, 0, 80)
-frame.Position = UDim2.new(0.5, -110, 0.85, -40) -- Centro inferior de la pantalla
+frame.Position = UDim2.new(0.5, -110, 0.85, -40)
 frame.BackgroundColor3 = Color3.fromRGB(20, 20, 30)
 frame.BorderSizePixel = 0
 frame.Parent = screenGui
@@ -24,7 +24,7 @@ frame.Parent = screenGui
 local frameCorner = Instance.new("UICorner")
 frameCorner.CornerRadius = UDim.new(0, 14)
 frameCorner.Parent = frame
--- Sombra/stroke decorativo
+-- Stroke decorativo
 local frameStroke = Instance.new("UIStroke")
 frameStroke.Color = Color3.fromRGB(255, 215, 0)
 frameStroke.Thickness = 2
@@ -46,11 +46,27 @@ button.Parent = frame
 local btnCorner = Instance.new("UICorner")
 btnCorner.CornerRadius = UDim.new(0, 10)
 btnCorner.Parent = button
+
+-- ============================================
+-- TEXTO DE ESTADO (aparece encima del botón)
+-- ============================================
+local statusLabel = Instance.new("TextLabel")
+statusLabel.Name = "StatusLabel"
+statusLabel.Size = UDim2.new(0, 220, 0, 40)
+statusLabel.Position = UDim2.new(0.5, -110, 0.85, -90) -- Encima del botón
+statusLabel.BackgroundTransparency = 1
+statusLabel.Text = ""
+statusLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+statusLabel.TextSize = 16
+statusLabel.Font = Enum.Font.GothamBold
+statusLabel.TextStrokeTransparency = 0.4 -- Sombra al texto para que se vea bien
+statusLabel.Parent = screenGui
+
 -- ============================================
 -- ANIMACIÓN DEL BOTÓN
 -- ============================================
 local TweenService = game:GetService("TweenService")
--- Efecto hover: botón se ilumina al pasar el mouse
+
 button.MouseEnter:Connect(function()
 	TweenService:Create(button, TweenInfo.new(0.15), {
 		BackgroundColor3 = Color3.fromRGB(255, 230, 80),
@@ -63,7 +79,6 @@ button.MouseLeave:Connect(function()
 		TextSize = 18,
 	}):Play()
 end)
--- Efecto clic: botón se encoge brevemente
 button.MouseButton1Down:Connect(function()
 	TweenService:Create(button, TweenInfo.new(0.08), {
 		Size = UDim2.new(0.95, -20, 0.9, -20),
@@ -74,6 +89,25 @@ button.MouseButton1Up:Connect(function()
 		Size = UDim2.new(1, -20, 1, -20),
 	}):Play()
 end)
+
+-- ============================================
+-- FUNCIÓN: mostrar texto de estado y ocultarlo
+-- ============================================
+local function mostrarEstado(texto, color)
+	statusLabel.Text = texto
+	statusLabel.TextColor3 = color
+	statusLabel.TextTransparency = 0
+
+	-- Desvanecer después de 2.5 segundos
+	task.delay(2, function()
+		TweenService:Create(statusLabel, TweenInfo.new(0.5), {
+			TextTransparency = 1,
+		}):Play()
+		task.wait(0.5)
+		statusLabel.Text = ""
+	end)
+end
+
 -- ============================================
 -- LÓGICA: DAR 30 WINS AL HACER CLIC via UpdateSpeed
 -- ============================================
@@ -86,24 +120,26 @@ button.MouseButton1Click:Connect(function()
 		local wins = leaderstats:FindFirstChild("Wins")
 		if wins then
 			UpdateSpeed:FireServer("Wins", 30)
-			-- Feedback visual: cambiar texto temporalmente
+			-- Feedback botón
 			button.Text = "✅  ¡+30 Wins!"
 			button.BackgroundColor3 = Color3.fromRGB(80, 220, 100)
+			-- Texto de estado encima
+			mostrarEstado("✅ ¡Funcionó! Se añadieron 30 Wins", Color3.fromRGB(80, 220, 100))
 			task.wait(1.5)
 			button.Text = "🏆  +30 Wins"
 			button.BackgroundColor3 = Color3.fromRGB(255, 200, 0)
 		else
-			-- Si no encuentra el stat "Wins"
-			button.Text = "❌  Stat no encontrado"
+			button.Text = "❌  Error"
 			button.BackgroundColor3 = Color3.fromRGB(220, 60, 60)
+			mostrarEstado("❌ No se encontró el stat 'Wins'", Color3.fromRGB(220, 60, 60))
 			task.wait(2)
 			button.Text = "🏆  +30 Wins"
 			button.BackgroundColor3 = Color3.fromRGB(255, 200, 0)
 		end
 	else
-		-- Si no existe leaderstats
-		button.Text = "❌  Sin leaderstats"
+		button.Text = "❌  Error"
 		button.BackgroundColor3 = Color3.fromRGB(220, 60, 60)
+		mostrarEstado("❌ No existe leaderstats", Color3.fromRGB(220, 60, 60))
 		task.wait(2)
 		button.Text = "🏆  +30 Wins"
 		button.BackgroundColor3 = Color3.fromRGB(255, 200, 0)
