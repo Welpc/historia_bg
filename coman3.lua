@@ -1,41 +1,109 @@
 -- ============================================================
---  AllRemotes_Checker.lu
---  Prueba TODOS los RemoteEvents y RemoteFunctions del juego
---  y muestra si cada uno es SEGURO o VULNERABLE
+--  StarterPlayerScripts_Executor_Scanner_UI_v5.lua
+--  Compatible con: Roblox Studio, Delta, KRNL, Synapse, Fluxus
 -- ============================================================
 
 local Players     = game:GetService("Players")
 local localPlayer = Players.LocalPlayer
 local playerGui   = localPlayer:WaitForChild("PlayerGui")
 
-if playerGui:FindFirstChild("AllRemotesUI") then
-	playerGui.AllRemotesUI:Destroy()
+if playerGui:FindFirstChild("ScannerUI") then
+	playerGui.ScannerUI:Destroy()
 end
 
+-- ----------------------------------------------------------------
+-- Colores
+-- ----------------------------------------------------------------
 local C = {
-	bg     = Color3.fromRGB(12, 12, 18),
-	panel  = Color3.fromRGB(20, 20, 30),
-	card   = Color3.fromRGB(28, 28, 40),
-	header = Color3.fromRGB(16, 16, 26),
-	border = Color3.fromRGB(50, 50, 75),
-	text   = Color3.fromRGB(225, 225, 240),
-	muted  = Color3.fromRGB(140, 140, 170),
-	dim    = Color3.fromRGB(80, 80, 110),
-	green  = Color3.fromRGB(60, 200, 110),
-	red    = Color3.fromRGB(220, 60, 60),
-	yellow = Color3.fromRGB(210, 170, 30),
-	blue   = Color3.fromRGB(60, 130, 220),
-	white  = Color3.fromRGB(255, 255, 255),
+	bg        = Color3.fromRGB(15, 15, 20),
+	panel     = Color3.fromRGB(22, 22, 32),
+	card      = Color3.fromRGB(30, 30, 44),
+	header    = Color3.fromRGB(18, 18, 28),
+	border    = Color3.fromRGB(55, 55, 80),
+	text      = Color3.fromRGB(225, 225, 240),
+	textMuted = Color3.fromRGB(140, 140, 170),
+	textDim   = Color3.fromRGB(90, 90, 120),
+	alta      = Color3.fromRGB(220, 65, 65),
+	media     = Color3.fromRGB(210, 150, 30),
+	baja      = Color3.fromRGB(55, 130, 210),
+	green     = Color3.fromRGB(65, 185, 110),
+	btnScan   = Color3.fromRGB(75, 105, 210),
+	btnCopy   = Color3.fromRGB(50, 140, 100),
+	btnClose  = Color3.fromRGB(180, 50, 50),
+	white     = Color3.fromRGB(255, 255, 255),
 }
 
-local function corner(p, r)
-	Instance.new("UICorner", p).CornerRadius = UDim.new(0, r or 8)
+local NIVEL_COLOR = { ALTA = C.alta, MEDIA = C.media, BAJA = C.baja }
+
+-- ----------------------------------------------------------------
+-- Sistema de copia universal (sin emojis para máxima compatibilidad)
+-- ----------------------------------------------------------------
+local function copiarTexto(texto)
+	-- Limpiar emojis y caracteres especiales que rompen algunos executors
+	local limpio = texto:gsub("[^\32-\126\n]", "")
+
+	-- Método 1: setclipboard (Delta, KRNL, Synapse, Fluxus)
+	if setclipboard then
+		local ok, err = pcall(setclipboard, limpio)
+		if ok then return true, "clipboard" end
+	end
+
+	-- Método 2: Clipboard vía TextBox oculto (Roblox Studio)
+	-- Crea un TextBox invisible, mete el texto y simula Ctrl+A + Copy
+	local ok2 = pcall(function()
+		local tbGui = Instance.new("ScreenGui")
+		tbGui.Name = "_CopyHelper"
+		tbGui.ResetOnSpawn = false
+		tbGui.Parent = playerGui
+
+		local tb = Instance.new("TextBox", tbGui)
+		tb.Size = UDim2.new(0, 1, 0, 1)
+		tb.Position = UDim2.new(2, 0, 2, 0) -- fuera de pantalla
+		tb.Text = limpio
+		tb.Visible = true
+		tb:CaptureFocus()
+
+		-- Seleccionar todo el texto del TextBox
+		tb.SelectionStart = 1
+		tb.CursorPosition = #limpio + 1
+
+		task.wait(0.05)
+		tbGui:Destroy()
+	end)
+	if ok2 then return true, "textbox" end
+
+	-- Método 3: toclipboard (Arceus X)
+	if toclipboard then
+		local ok3 = pcall(toclipboard, limpio)
+		if ok3 then return true, "toclipboard" end
+	end
+
+	-- Método 4: writefile — guarda el reporte como .txt
+	if writefile then
+		local ok4 = pcall(writefile, "ScannerReporte.txt", limpio)
+		if ok4 then return true, "writefile" end
+	end
+
+	-- Último recurso: imprimir en Output
+	print(limpio)
+	return false, "output"
 end
+
+-- ----------------------------------------------------------------
+-- Helpers UI
+-- ----------------------------------------------------------------
+local function corner(p, r)
+	local c = Instance.new("UICorner", p)
+	c.CornerRadius = UDim.new(0, r or 8)
+end
+
 local function stroke(p, col, t)
 	local s = Instance.new("UIStroke", p)
-	s.Color = col or C.border s.Thickness = t or 1
+	s.Color = col or C.border
+	s.Thickness = t or 1
 end
-local function mkLabel(parent, props)
+
+local function label(parent, props)
 	local l = Instance.new("TextLabel", parent)
 	l.BackgroundTransparency = 1
 	l.Font = props.font or Enum.Font.Gotham
@@ -55,21 +123,41 @@ end
 -- ----------------------------------------------------------------
 -- ScreenGui
 -- ----------------------------------------------------------------
-local sg = Instance.new("ScreenGui")
-sg.Name = "AllRemotesUI"
-sg.ResetOnSpawn = false
-sg.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-sg.IgnoreGuiInset = true
-sg.Parent = playerGui
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "ScannerUI"
+screenGui.ResetOnSpawn = false
+screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+screenGui.IgnoreGuiInset = true
+screenGui.Parent = playerGui
 
--- Panel
-local main = Instance.new("Frame", sg)
-main.Size = UDim2.new(0, 440, 0, 560)
-main.Position = UDim2.new(0.5, -220, 0.5, -280)
+-- ----------------------------------------------------------------
+-- Botón flotante
+-- ----------------------------------------------------------------
+local launchBtn = Instance.new("TextButton", screenGui)
+launchBtn.Size = UDim2.new(0, 136, 0, 34)
+launchBtn.Position = UDim2.new(0, 14, 0.5, -17)
+launchBtn.BackgroundColor3 = C.btnScan
+launchBtn.Text = "  Scan Scripts"
+launchBtn.TextColor3 = C.white
+launchBtn.TextSize = 12
+launchBtn.Font = Enum.Font.GothamBold
+launchBtn.BorderSizePixel = 0
+launchBtn.ZIndex = 10
+corner(launchBtn, 10)
+stroke(launchBtn, Color3.fromRGB(100, 130, 255), 1)
+
+-- ----------------------------------------------------------------
+-- Panel principal
+-- ----------------------------------------------------------------
+local main = Instance.new("Frame", screenGui)
+main.Name = "Main"
+main.Size = UDim2.new(0, 420, 0, 460)
+main.Position = UDim2.new(0.5, -210, 0.5, -230)
 main.BackgroundColor3 = C.bg
 main.BorderSizePixel = 0
 main.Active = true
 main.Draggable = true
+main.Visible = false
 main.ZIndex = 5
 corner(main, 12)
 stroke(main, C.border, 1.5)
@@ -78,395 +166,427 @@ stroke(main, C.border, 1.5)
 local hdr = Instance.new("Frame", main)
 hdr.Size = UDim2.new(1, 0, 0, 40)
 hdr.BackgroundColor3 = C.header
-hdr.BorderSizePixel = 0 hdr.ZIndex = 6
+hdr.BorderSizePixel = 0
+hdr.ZIndex = 6
 corner(hdr, 12)
+
 local hdrPatch = Instance.new("Frame", hdr)
 hdrPatch.Size = UDim2.new(1, 0, 0.5, 0)
 hdrPatch.Position = UDim2.new(0, 0, 0.5, 0)
 hdrPatch.BackgroundColor3 = C.header
-hdrPatch.BorderSizePixel = 0 hdrPatch.ZIndex = 6
+hdrPatch.BorderSizePixel = 0
+hdrPatch.ZIndex = 6
 
-mkLabel(hdr, {
-	text = "All Remotes Checker",
-	font = Enum.Font.GothamBold, size = 13, color = C.text,
-	sz = UDim2.new(1,-46,1,0), pos = UDim2.new(0,12,0,0), z = 7,
+label(hdr, {
+	text  = "PlayerScripts Scanner",
+	font  = Enum.Font.GothamBold,
+	size  = 13,
+	color = C.text,
+	sz    = UDim2.new(1, -46, 1, 0),
+	pos   = UDim2.new(0, 12, 0, 0),
+	z     = 7,
 })
 
 local closeBtn = Instance.new("TextButton", hdr)
-closeBtn.Size = UDim2.new(0,26,0,26)
-closeBtn.Position = UDim2.new(1,-34,0.5,-13)
-closeBtn.BackgroundColor3 = C.red
-closeBtn.Text = "X" closeBtn.TextColor3 = C.white
-closeBtn.TextSize = 11 closeBtn.Font = Enum.Font.GothamBold
-closeBtn.BorderSizePixel = 0 closeBtn.ZIndex = 8
+closeBtn.Size = UDim2.new(0, 26, 0, 26)
+closeBtn.Position = UDim2.new(1, -34, 0.5, -13)
+closeBtn.BackgroundColor3 = C.btnClose
+closeBtn.Text = "X"
+closeBtn.TextColor3 = C.white
+closeBtn.TextSize = 11
+closeBtn.Font = Enum.Font.GothamBold
+closeBtn.BorderSizePixel = 0
+closeBtn.ZIndex = 8
 corner(closeBtn, 6)
-closeBtn.MouseButton1Click:Connect(function() sg:Destroy() end)
 
--- Stats en tiempo real
-local statsFrame = Instance.new("Frame", main)
-statsFrame.Size = UDim2.new(1,-16,0,40)
-statsFrame.Position = UDim2.new(0,8,0,48)
-statsFrame.BackgroundColor3 = C.panel
-statsFrame.BorderSizePixel = 0 statsFrame.ZIndex = 6
-corner(statsFrame, 8)
-stroke(statsFrame, C.border, 1)
+-- Toolbar
+local toolbar = Instance.new("Frame", main)
+toolbar.Size = UDim2.new(1, -16, 0, 32)
+toolbar.Position = UDim2.new(0, 8, 0, 48)
+toolbar.BackgroundColor3 = C.panel
+toolbar.BorderSizePixel = 0
+toolbar.ZIndex = 6
+corner(toolbar, 7)
+stroke(toolbar, C.border, 1)
 
-mkLabel(statsFrame, {
-	text = "STATS EN TIEMPO REAL",
-	font = Enum.Font.GothamBold, size = 9, color = C.dim,
-	sz = UDim2.new(1,-10,0,14), pos = UDim2.new(0,10,0,2), z = 7,
-})
-local statsValLabel = mkLabel(statsFrame, {
-	text = "Cargando...",
-	font = Enum.Font.GothamBold, size = 11, color = C.yellow,
-	sz = UDim2.new(1,-10,0,18), pos = UDim2.new(0,10,0,18),
-	trunc = Enum.TextTruncate.AtEnd, z = 7,
+local summaryLabel = label(toolbar, {
+	text  = "Presiona Escanear para iniciar...",
+	size  = 11,
+	color = C.textMuted,
+	sz    = UDim2.new(1, -190, 1, 0),
+	pos   = UDim2.new(0, 10, 0, 0),
+	xa    = Enum.TextXAlignment.Left,
+	z     = 7,
 })
 
--- Barra de progreso
-local progressBar = Instance.new("Frame", main)
-progressBar.Size = UDim2.new(1,-16,0,28)
-progressBar.Position = UDim2.new(0,8,0,96)
-progressBar.BackgroundColor3 = C.panel
-progressBar.BorderSizePixel = 0 progressBar.ZIndex = 6
-corner(progressBar, 7)
-stroke(progressBar, C.border, 1)
+local scanBtn = Instance.new("TextButton", toolbar)
+scanBtn.Size = UDim2.new(0, 88, 0, 22)
+scanBtn.Position = UDim2.new(1, -182, 0.5, -11)
+scanBtn.BackgroundColor3 = C.btnScan
+scanBtn.Text = "Escanear"
+scanBtn.TextColor3 = C.white
+scanBtn.TextSize = 11
+scanBtn.Font = Enum.Font.GothamBold
+scanBtn.BorderSizePixel = 0
+scanBtn.ZIndex = 8
+corner(scanBtn, 6)
 
-local progressFill = Instance.new("Frame", progressBar)
-progressFill.Size = UDim2.new(0,0,1,0)
-progressFill.BackgroundColor3 = C.blue
-progressFill.BorderSizePixel = 0 progressFill.ZIndex = 7
-corner(progressFill, 7)
+local copyBtn = Instance.new("TextButton", toolbar)
+copyBtn.Size = UDim2.new(0, 82, 0, 22)
+copyBtn.Position = UDim2.new(1, -90, 0.5, -11)
+copyBtn.BackgroundColor3 = Color3.fromRGB(40, 40, 60)
+copyBtn.Text = "Copiar"
+copyBtn.TextColor3 = Color3.fromRGB(100, 100, 130)
+copyBtn.TextSize = 11
+copyBtn.Font = Enum.Font.GothamBold
+copyBtn.BorderSizePixel = 0
+copyBtn.ZIndex = 8
+corner(copyBtn, 6)
+stroke(copyBtn, C.border, 1)
 
-local progressLabel = mkLabel(progressBar, {
-	text = "Listo para escanear",
-	font = Enum.Font.GothamBold, size = 10, color = C.white,
-	sz = UDim2.new(1,0,1,0),
-	xa = Enum.TextXAlignment.Center, z = 8,
-})
-
--- Resumen contadores
-local resumeFrame = Instance.new("Frame", main)
-resumeFrame.Size = UDim2.new(1,-16,0,36)
-resumeFrame.Position = UDim2.new(0,8,0,132)
-resumeFrame.BackgroundColor3 = C.panel
-resumeFrame.BorderSizePixel = 0 resumeFrame.ZIndex = 6
-corner(resumeFrame, 7)
-stroke(resumeFrame, C.border, 1)
-
-local statsLayout = Instance.new("UIListLayout", resumeFrame)
-statsLayout.FillDirection = Enum.FillDirection.Horizontal
-statsLayout.SortOrder = Enum.SortOrder.LayoutOrder
-
-local counters = {}
-local counterDefs = {
-	{key="total",  label="TOTAL",       color=C.muted},
-	{key="vuln",   label="VULNERABLE",  color=C.red},
-	{key="seguro", label="SEGURO",      color=C.green},
-	{key="skip",   label="SIN CAMBIOS", color=C.yellow},
-}
-
-for i, def in ipairs(counterDefs) do
-	local cell = Instance.new("Frame", resumeFrame)
-	cell.Size = UDim2.new(0.25,0,1,0)
-	cell.BackgroundTransparency = 1
-	cell.ZIndex = 7 cell.LayoutOrder = i
-
-	local num = mkLabel(cell, {
-		text = "0", font = Enum.Font.GothamBold,
-		size = 14, color = def.color,
-		sz = UDim2.new(1,0,0,20), pos = UDim2.new(0,0,0,2),
-		xa = Enum.TextXAlignment.Center, z = 8,
-	})
-	mkLabel(cell, {
-		text = def.label, font = Enum.Font.Gotham,
-		size = 8, color = C.dim,
-		sz = UDim2.new(1,0,0,12), pos = UDim2.new(0,0,0,20),
-		xa = Enum.TextXAlignment.Center, z = 8,
-	})
-	counters[def.key] = num
-end
-
--- ScrollingFrame resultados
+-- ScrollingFrame
 local scroll = Instance.new("ScrollingFrame", main)
-scroll.Size = UDim2.new(1,-16,1,-236)
-scroll.Position = UDim2.new(0,8,0,176)
+scroll.Size = UDim2.new(1, -16, 1, -92)
+scroll.Position = UDim2.new(0, 8, 0, 88)
 scroll.BackgroundColor3 = C.panel
 scroll.BorderSizePixel = 0
 scroll.ScrollBarThickness = 4
-scroll.ScrollBarImageColor3 = Color3.fromRGB(70,70,110)
-scroll.CanvasSize = UDim2.new(0,0,0,0)
+scroll.ScrollBarImageColor3 = Color3.fromRGB(80, 80, 130)
+scroll.CanvasSize = UDim2.new(0, 0, 0, 0)
 scroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
 scroll.ZIndex = 6
 corner(scroll, 8)
 stroke(scroll, C.border, 1)
 
-local layout = Instance.new("UIListLayout", scroll)
-layout.Padding = UDim.new(0,4)
-layout.SortOrder = Enum.SortOrder.LayoutOrder
-local lpad = Instance.new("UIPadding", scroll)
-lpad.PaddingTop = UDim.new(0,6) lpad.PaddingBottom = UDim.new(0,6)
-lpad.PaddingLeft = UDim.new(0,6) lpad.PaddingRight = UDim.new(0,6)
+local listLayout = Instance.new("UIListLayout", scroll)
+listLayout.Padding = UDim.new(0, 5)
+listLayout.SortOrder = Enum.SortOrder.LayoutOrder
 
--- Botones
-local btnFrame = Instance.new("Frame", main)
-btnFrame.Size = UDim2.new(1,-16,0,28)
-btnFrame.Position = UDim2.new(0,8,1,-34)
-btnFrame.BackgroundTransparency = 1 btnFrame.ZIndex = 6
+local listPad = Instance.new("UIPadding", scroll)
+listPad.PaddingTop    = UDim.new(0, 6)
+listPad.PaddingBottom = UDim.new(0, 6)
+listPad.PaddingLeft   = UDim.new(0, 6)
+listPad.PaddingRight  = UDim.new(0, 6)
 
-local scanAllBtn = Instance.new("TextButton", btnFrame)
-scanAllBtn.Size = UDim2.new(0.65,0,1,0)
-scanAllBtn.Position = UDim2.new(0,0,0,0)
-scanAllBtn.BackgroundColor3 = Color3.fromRGB(70,100,210)
-scanAllBtn.Text = "Escanear todos los remotes"
-scanAllBtn.TextColor3 = C.white scanAllBtn.TextSize = 11
-scanAllBtn.Font = Enum.Font.GothamBold
-scanAllBtn.BorderSizePixel = 0 scanAllBtn.ZIndex = 7
-corner(scanAllBtn, 6)
+-- Toast
+local toast = Instance.new("Frame", screenGui)
+toast.Size = UDim2.new(0, 280, 0, 34)
+toast.Position = UDim2.new(0.5, -140, 1, -56)
+toast.BackgroundColor3 = Color3.fromRGB(30, 30, 44)
+toast.BorderSizePixel = 0
+toast.ZIndex = 20
+toast.Visible = false
+corner(toast, 8)
+stroke(toast, C.border, 1)
 
-local limpiarBtn = Instance.new("TextButton", btnFrame)
-limpiarBtn.Size = UDim2.new(0.32,0,1,0)
-limpiarBtn.Position = UDim2.new(0.68,0,0,0)
-limpiarBtn.BackgroundColor3 = Color3.fromRGB(30,30,45)
-limpiarBtn.Text = "Limpiar"
-limpiarBtn.TextColor3 = C.dim limpiarBtn.TextSize = 11
-limpiarBtn.Font = Enum.Font.Gotham
-limpiarBtn.BorderSizePixel = 0 limpiarBtn.ZIndex = 7
-corner(limpiarBtn, 6)
-stroke(limpiarBtn, C.border, 1)
+local toastLabel = label(toast, {
+	text = "",
+	size = 11,
+	font = Enum.Font.GothamBold,
+	color = C.white,
+	sz = UDim2.new(1, -10, 1, 0),
+	pos = UDim2.new(0, 10, 0, 0),
+	xa = Enum.TextXAlignment.Left,
+	z = 21,
+})
+
+local function mostrarToast(texto, color)
+	toastLabel.Text = texto
+	toast.BackgroundColor3 = color or Color3.fromRGB(30, 30, 44)
+	toast.Visible = true
+	task.delay(2.5, function() toast.Visible = false end)
+end
 
 -- ----------------------------------------------------------------
--- Helpers
+-- Módulos de escaneo
 -- ----------------------------------------------------------------
-local cardOrden = 0
+local function escanear()
+	local hallazgos = {}
 
-local function addCard(remote, estado, cambios)
-	cardOrden = cardOrden + 1
-	local col = estado == "VULNERABLE" and C.red
-		or estado == "SEGURO" and C.green
-		or C.yellow
-
-	local card = Instance.new("Frame", scroll)
-	card.Size = UDim2.new(1,0,0,58)
-	card.BackgroundColor3 = C.card
-	card.BorderSizePixel = 0
-	card.LayoutOrder = cardOrden
-	card.ZIndex = 7
-	corner(card, 7)
-	stroke(card, C.border, 1)
-
-	-- Barra lateral
-	local barra = Instance.new("Frame", card)
-	barra.Size = UDim2.new(0,3,1,-10)
-	barra.Position = UDim2.new(0,0,0,5)
-	barra.BackgroundColor3 = col
-	barra.BorderSizePixel = 0 barra.ZIndex = 8
-	corner(barra, 3)
-
-	-- Badge estado
-	local badge = Instance.new("Frame", card)
-	badge.Size = UDim2.new(0,80,0,16)
-	badge.Position = UDim2.new(0,10,0,6)
-	badge.BackgroundColor3 = col
-	badge.BorderSizePixel = 0 badge.ZIndex = 8
-	corner(badge, 4)
-	mkLabel(badge, {
-		text = estado, font = Enum.Font.GothamBold,
-		size = 9, color = C.white,
-		sz = UDim2.new(1,0,1,0),
-		xa = Enum.TextXAlignment.Center, z = 9,
-	})
-
-	-- Tipo remote
-	local tipoBadge = Instance.new("Frame", card)
-	tipoBadge.Size = UDim2.new(0,60,0,16)
-	tipoBadge.Position = UDim2.new(0,96,0,6)
-	tipoBadge.BackgroundColor3 = Color3.fromRGB(40,40,60)
-	tipoBadge.BorderSizePixel = 0 tipoBadge.ZIndex = 8
-	corner(tipoBadge, 4)
-	mkLabel(tipoBadge, {
-		text = remote.ClassName == "RemoteFunction" and "Function" or "Event",
-		font = Enum.Font.Gotham, size = 9, color = C.muted,
-		sz = UDim2.new(1,0,1,0),
-		xa = Enum.TextXAlignment.Center, z = 9,
-	})
-
-	-- Nombre
-	mkLabel(card, {
-		text = remote.Name,
-		font = Enum.Font.GothamBold, size = 11, color = C.text,
-		sz = UDim2.new(1,-170,0,16),
-		pos = UDim2.new(0,162,0,5),
-		trunc = Enum.TextTruncate.AtEnd, z = 8,
-	})
-
-	-- Ruta
-	mkLabel(card, {
-		text = "Ruta: " .. remote:GetFullName(),
-		size = 9, color = C.dim,
-		sz = UDim2.new(1,-16,0,14),
-		pos = UDim2.new(0,10,0,26),
-		trunc = Enum.TextTruncate.AtEnd, z = 8,
-	})
-
-	-- Cambios detectados
-	local cambioTexto = "Sin cambios en stats"
-	if cambios and #cambios > 0 then
-		cambioTexto = table.concat(cambios, "  |  ")
-	end
-	mkLabel(card, {
-		text = cambioTexto,
-		font = Enum.Font.GothamBold, size = 9,
-		color = #(cambios or {}) > 0 and C.red or C.green,
-		sz = UDim2.new(1,-16,0,14),
-		pos = UDim2.new(0,10,0,40),
-		trunc = Enum.TextTruncate.AtEnd, z = 8,
-	})
-
-	task.wait()
-	scroll.CanvasPosition = Vector2.new(0, math.huge)
-end
-
-local function getStatsTabla()
-	local t = {}
-	local ls = localPlayer:FindFirstChild("leaderstats")
-	if ls then
-		for _, s in ipairs(ls:GetChildren()) do t[s.Name] = s.Value end
-	end
-	return t
-end
-
-local function getStatsTexto()
-	local ls = localPlayer:FindFirstChild("leaderstats")
-	if not ls then return "Sin leaderstats" end
-	local p = {}
-	for _, s in ipairs(ls:GetChildren()) do
-		table.insert(p, s.Name..": "..tostring(s.Value))
-	end
-	return table.concat(p, "  |  ")
-end
-
-local function diffStats(antes, despues)
-	local cambios = {}
-	for nombre, valAntes in pairs(antes) do
-		local valDespues = despues[nombre] or valAntes
-		local diff = valDespues - valAntes
-		if diff ~= 0 then
-			local signo = diff > 0 and "+" or ""
-			table.insert(cambios, nombre..": "..signo..diff)
+	local function reg(nivel, nombre, detalle, obj)
+		local ruta = "N/A"
+		if obj then
+			local ok, r = pcall(function() return obj:GetFullName() end)
+			if ok then ruta = r end
 		end
+		table.insert(hallazgos, { nivel=nivel, nombre=nombre, detalle=detalle, ruta=ruta })
 	end
-	return cambios
-end
 
--- Stats en tiempo real
-task.spawn(function()
-	while sg.Parent do
-		statsValLabel.Text = getStatsTexto()
-		task.wait(0.5)
-	end
-end)
-
--- ----------------------------------------------------------------
--- ESCANEO PRINCIPAL
--- ----------------------------------------------------------------
-local escaneando = false
-
-scanAllBtn.MouseButton1Click:Connect(function()
-	if escaneando then return end
-	escaneando = true
-
-	-- Limpiar resultados anteriores
-	for _, ch in ipairs(scroll:GetChildren()) do
-		if ch:IsA("Frame") then ch:Destroy() end
-	end
-	cardOrden = 0
-
-	-- Recolectar todos los remotes
-	local remotes = {}
+	local palabrasRem = {
+		"give","admin","kick","ban","money","cash","coins","damage",
+		"kill","speed","fly","tp","teleport","god","item","tool",
+		"weapon","power","level","exp","reward","buy","sell","skip",
+	}
 	for _, v in ipairs(game:GetDescendants()) do
 		if v:IsA("RemoteEvent") or v:IsA("RemoteFunction") then
-			table.insert(remotes, v)
-		end
-	end
-
-	-- Resetear contadores
-	local cTotal, cVuln, cSeguro, cSkip = 0, 0, 0, 0
-	counters.total.Text = tostring(#remotes)
-	counters.vuln.Text = "0"
-	counters.seguro.Text = "0"
-	counters.skip.Text = "0"
-
-	scanAllBtn.Text = "Escaneando..."
-	scanAllBtn.BackgroundColor3 = Color3.fromRGB(45,45,70)
-
-	for i, remote in ipairs(remotes) do
-		-- Actualizar barra de progreso
-		local pct = i / #remotes
-		progressFill.Size = UDim2.new(pct, 0, 1, 0)
-		progressLabel.Text = string.format("Probando %d/%d — %s", i, #remotes, remote.Name)
-
-		local antes = getStatsTabla()
-		local ok = pcall(function()
-			if remote:IsA("RemoteFunction") then
-				-- InvokeServer con timeout
-				local resultado
-				local hilo = task.spawn(function()
-					pcall(function()
-						resultado = remote:InvokeServer()
-					end)
-				end)
-				task.wait(1)
-				task.cancel(hilo)
-			else
-				remote:FireServer()
+			local n = v.Name:lower()
+			for _, p in ipairs(palabrasRem) do
+				if n:find(p) then
+					reg("ALTA","Remote sospechoso: "..v.Name,"Sin validacion en servidor.",v)
+					break
+				end
 			end
-		end)
-
-		task.wait(1)
-		local despues = getStatsTabla()
-		local cambios = diffStats(antes, despues)
-
-		local estado
-		if #cambios > 0 then
-			estado = "VULNERABLE"
-			cVuln = cVuln + 1
-		else
-			estado = "SEGURO"
-			cSeguro = cSeguro + 1
+			if v:IsA("RemoteFunction") then
+				reg("MEDIA","RemoteFunction: "..v.Name,"Verifica que siempre devuelva valor.",v)
+			end
 		end
-
-		cTotal = cTotal + 1
-		counters.total.Text  = tostring(cTotal)
-		counters.vuln.Text   = tostring(cVuln)
-		counters.seguro.Text = tostring(cSeguro)
-
-		addCard(remote, estado, cambios)
 	end
 
-	-- Finalizar
-	progressFill.Size = UDim2.new(1, 0, 1, 0)
-	progressFill.BackgroundColor3 = cVuln > 0 and C.red or C.green
-	progressLabel.Text = string.format(
-		"Listo — %d vulnerable(s) de %d remotes", cVuln, #remotes)
+	local sps = localPlayer:FindFirstChild("PlayerScripts")
+	if not sps then
+		reg("MEDIA","PlayerScripts no encontrado","No hallado en LocalPlayer.",nil)
+	else
+		for _, d in ipairs(sps:GetDescendants()) do
+			if d:IsA("LocalScript") and d.Disabled then
+				reg("BAJA","LocalScript deshabilitado: "..d.Name,"Puede tener conexiones activas.",d)
+			end
+			if d:IsA("ModuleScript") then
+				local n = d.Name:lower()
+				if n:find("key") or n:find("token") or n:find("secret")
+				or n:find("password") or n:find("auth") then
+					reg("ALTA","ModuleScript sensible: "..d.Name,"Datos sensibles expuestos al cliente.",d)
+				end
+			end
+			if d:IsA("BindableEvent") or d:IsA("BindableFunction") then
+				reg("BAJA","Bindable expuesto: "..d.Name,"Puede invocarse externamente.",d)
+			end
+		end
+	end
 
-	scanAllBtn.Text = "Re-escanear"
-	scanAllBtn.BackgroundColor3 = Color3.fromRGB(70,100,210)
-	escaneando = false
-end)
+	local palabrasVal = {"key","token","secret","password","auth","admin","rank","permission","role"}
+	for _, d in ipairs(game:GetDescendants()) do
+		if d:IsA("StringValue") or d:IsA("IntValue") or d:IsA("NumberValue") then
+			local n = d.Name:lower()
+			for _, p in ipairs(palabrasVal) do
+				if n:find(p) then
+					reg("ALTA","Valor sensible: "..d.Name,"Accesible desde el cliente.",d)
+					break
+				end
+			end
+		end
+	end
 
-limpiarBtn.MouseButton1Click:Connect(function()
+	local char = localPlayer.Character
+	if not char then
+		reg("ALTA","Character es nil","Scripts sin nil-check fallaran.",localPlayer)
+	else
+		if not char:FindFirstChildOfClass("Humanoid") then
+			reg("MEDIA","Humanoid no encontrado","Scripts que dependan de el pueden fallar.",char)
+		end
+		if not char:FindFirstChild("HumanoidRootPart") then
+			reg("MEDIA","HumanoidRootPart no encontrado","Scripts sin nil-check fallaran.",char)
+		end
+	end
+
+	return hallazgos
+end
+
+-- ----------------------------------------------------------------
+-- Generar texto limpio (sin emojis) para el portapapeles
+-- ----------------------------------------------------------------
+local function generarTexto(hallazgos)
+	local lineas = {}
+	table.insert(lineas, "====================================")
+	table.insert(lineas, "  REPORTE - PlayerScripts Scanner")
+	table.insert(lineas, "====================================")
+
+	local cA, cM, cB = 0, 0, 0
+	for _, h in ipairs(hallazgos) do
+		if h.nivel=="ALTA"  then cA=cA+1 end
+		if h.nivel=="MEDIA" then cM=cM+1 end
+		if h.nivel=="BAJA"  then cB=cB+1 end
+	end
+
+	table.insert(lineas, string.format(
+		"Total: %d  |  Alta: %d  |  Media: %d  |  Baja: %d",
+		#hallazgos, cA, cM, cB))
+	table.insert(lineas, "")
+
+	for _, h in ipairs(hallazgos) do
+		table.insert(lineas, string.format("[%s] %s", h.nivel, h.nombre))
+		table.insert(lineas, "  Ruta   : " .. h.ruta)
+		table.insert(lineas, "  Consejo: " .. h.detalle)
+		table.insert(lineas, "")
+	end
+
+	table.insert(lineas, "====================================")
+	return table.concat(lineas, "\n")
+end
+
+-- ----------------------------------------------------------------
+-- Renderizar tarjetas
+-- ----------------------------------------------------------------
+local ultimosHallazgos = {}
+
+local function renderizarHallazgos(hallazgos)
+	ultimosHallazgos = hallazgos
+
 	for _, ch in ipairs(scroll:GetChildren()) do
 		if ch:IsA("Frame") then ch:Destroy() end
 	end
-	cardOrden = 0
-	counters.total.Text = "0"
-	counters.vuln.Text  = "0"
-	counters.seguro.Text = "0"
-	counters.skip.Text  = "0"
-	progressFill.Size = UDim2.new(0,0,1,0)
-	progressFill.BackgroundColor3 = C.blue
-	progressLabel.Text = "Listo para escanear"
+
+	local orden = { ALTA=1, MEDIA=2, BAJA=3 }
+	table.sort(hallazgos, function(a,b)
+		return (orden[a.nivel] or 9) < (orden[b.nivel] or 9)
+	end)
+
+	local cA, cM, cB = 0, 0, 0
+	for _, h in ipairs(hallazgos) do
+		if h.nivel=="ALTA"  then cA=cA+1 end
+		if h.nivel=="MEDIA" then cM=cM+1 end
+		if h.nivel=="BAJA"  then cB=cB+1 end
+	end
+
+	if #hallazgos == 0 then
+		summaryLabel.Text = "Sin vulnerabilidades detectadas."
+		summaryLabel.TextColor3 = C.green
+		copyBtn.BackgroundColor3 = Color3.fromRGB(40, 40, 60)
+		copyBtn.TextColor3 = Color3.fromRGB(100, 100, 130)
+		local emptyCard = Instance.new("Frame", scroll)
+		emptyCard.Size = UDim2.new(1, 0, 0, 50)
+		emptyCard.BackgroundColor3 = C.card
+		emptyCard.BorderSizePixel = 0
+		emptyCard.LayoutOrder = 1
+		emptyCard.ZIndex = 7
+		corner(emptyCard, 7)
+		label(emptyCard, {
+			text  = "Sin vulnerabilidades encontradas",
+			font  = Enum.Font.GothamBold,
+			size  = 12,
+			color = C.green,
+			sz    = UDim2.new(1, 0, 1, 0),
+			xa    = Enum.TextXAlignment.Center,
+			z     = 8,
+		})
+		return
+	end
+
+	summaryLabel.Text = string.format(
+		"Total: %d  Alta: %d  Media: %d  Baja: %d",
+		#hallazgos, cA, cM, cB)
+	summaryLabel.TextColor3 = C.textMuted
+	copyBtn.BackgroundColor3 = C.btnCopy
+	copyBtn.TextColor3 = C.white
+
+	for i, h in ipairs(hallazgos) do
+		local col = NIVEL_COLOR[h.nivel] or C.baja
+
+		local card = Instance.new("Frame", scroll)
+		card.Size = UDim2.new(1, 0, 0, 76)
+		card.BackgroundColor3 = C.card
+		card.BorderSizePixel = 0
+		card.LayoutOrder = i
+		card.ZIndex = 7
+		corner(card, 7)
+		stroke(card, C.border, 1)
+
+		local barra = Instance.new("Frame", card)
+		barra.Size = UDim2.new(0, 3, 1, -10)
+		barra.Position = UDim2.new(0, 0, 0, 5)
+		barra.BackgroundColor3 = col
+		barra.BorderSizePixel = 0
+		barra.ZIndex = 8
+		corner(barra, 3)
+
+		local badge = Instance.new("Frame", card)
+		badge.Size = UDim2.new(0, 56, 0, 17)
+		badge.Position = UDim2.new(0, 10, 0, 8)
+		badge.BackgroundColor3 = col
+		badge.BorderSizePixel = 0
+		badge.ZIndex = 8
+		corner(badge, 4)
+		label(badge, {
+			text  = h.nivel,
+			font  = Enum.Font.GothamBold,
+			size  = 9,
+			color = C.white,
+			sz    = UDim2.new(1, 0, 1, 0),
+			xa    = Enum.TextXAlignment.Center,
+			z     = 9,
+		})
+
+		label(card, {
+			text  = h.nombre,
+			font  = Enum.Font.GothamBold,
+			size  = 11,
+			color = C.text,
+			sz    = UDim2.new(1, -80, 0, 17),
+			pos   = UDim2.new(0, 74, 0, 7),
+			trunc = Enum.TextTruncate.AtEnd,
+			z     = 8,
+		})
+
+		label(card, {
+			text  = "Ruta: "..h.ruta,
+			size  = 9,
+			color = C.textDim,
+			sz    = UDim2.new(1, -16, 0, 14),
+			pos   = UDim2.new(0, 10, 0, 30),
+			trunc = Enum.TextTruncate.AtEnd,
+			z     = 8,
+		})
+
+		label(card, {
+			text  = "Consejo: "..h.detalle,
+			size  = 9,
+			color = C.textMuted,
+			sz    = UDim2.new(1, -16, 0, 24),
+			pos   = UDim2.new(0, 10, 0, 46),
+			wrap  = true,
+			ya    = Enum.TextYAlignment.Top,
+			z     = 8,
+		})
+	end
+end
+
+-- ----------------------------------------------------------------
+-- Eventos
+-- ----------------------------------------------------------------
+scanBtn.MouseButton1Click:Connect(function()
+	scanBtn.Text = "Escaneando..."
+	scanBtn.BackgroundColor3 = Color3.fromRGB(50, 50, 80)
+	task.wait(0.1)
+	local resultados = escanear()
+	renderizarHallazgos(resultados)
+	scanBtn.Text = "Re-escanear"
+	scanBtn.BackgroundColor3 = C.btnScan
 end)
 
-print("All Remotes Checker listo.")
+copyBtn.MouseButton1Click:Connect(function()
+	if #ultimosHallazgos == 0 then return end
+
+	local texto = generarTexto(ultimosHallazgos)
+	local ok, metodo = copiarTexto(texto)
+
+	if ok then
+		if metodo == "writefile" then
+			mostrarToast("Guardado en ScannerReporte.txt", Color3.fromRGB(60, 100, 160))
+		elseif metodo == "textbox" then
+			mostrarToast("Texto seleccionado - presiona Ctrl+C", Color3.fromRGB(80, 100, 180))
+		else
+			mostrarToast("Copiado al portapapeles!", Color3.fromRGB(40, 130, 70))
+		end
+		copyBtn.Text = "Copiado!"
+		copyBtn.BackgroundColor3 = Color3.fromRGB(40, 160, 80)
+		task.wait(1.5)
+		copyBtn.Text = "Copiar"
+		copyBtn.BackgroundColor3 = C.btnCopy
+	else
+		mostrarToast("Ver Output (F9 o Ctrl+F9)", Color3.fromRGB(160, 100, 30))
+		copyBtn.Text = "Ver Output"
+		task.wait(2)
+		copyBtn.Text = "Copiar"
+	end
+end)
+
+launchBtn.MouseButton1Click:Connect(function()
+	main.Visible = not main.Visible
+	launchBtn.Text = main.Visible and "X  Cerrar" or "Scan Scripts"
+end)
+
+closeBtn.MouseButton1Click:Connect(function()
+	main.Visible = false
+	launchBtn.Text = "Scan Scripts"
+end)
+
+print("Scanner UI v5 listo.")
