@@ -1,8 +1,8 @@
 -- ============================================================
---  AllRemotes_Checker_v3.lua
+--  AllRemotes_Checker_v4.lua
 --  Prueba TODOS los remotes del juego
 --  Detecta cambios en: leaderstats, Backpack y Character
---  Las tools recibidas se guardan y NO se pueden quitar
+--  Las tools recibidas NO se pueden usar ni quitar
 -- ============================================================
 
 local Players          = game:GetService("Players")
@@ -55,12 +55,42 @@ end
 
 -- ================================================================
 -- SISTEMA DE PROTECCION DE TOOLS
--- Guarda las tools recibidas en una carpeta segura
--- y las restaura si alguien intenta quitarlas
+-- - Bloquea Activated (click) para que no se consuma
+-- - Restaura la tool si alguien intenta quitarla
 -- ================================================================
-local toolsProtegidas = {} -- nombre -> tool clonada
-local proteccionActiva = false
+local toolsProtegidas    = {}
 local conexionesProteccion = {}
+local proteccionActiva   = false
+
+local function protegerTool(tool)
+	if not tool:IsA("Tool") then return end
+	if toolsProtegidas[tool.Name] then return end -- ya protegida
+
+	-- Guardar clon
+	local clon = tool:Clone()
+	toolsProtegidas[tool.Name] = clon
+
+	-- Bloquear Activated (click) — no hace nada al clickear
+	local connActivated = tool.Activated:Connect(function() end)
+	table.insert(conexionesProteccion, connActivated)
+
+	-- Bloquear Unequipped para que no desaparezca al desequipar
+	local connUnequip = tool.Unequipped:Connect(function()
+		task.wait(0.05)
+		local bp = localPlayer:FindFirstChild("Backpack")
+		if bp and not bp:FindFirstChild(tool.Name) then
+			local restaurada = toolsProtegidas[tool.Name]
+			if restaurada then
+				local nueva = restaurada:Clone()
+				-- Proteger la nueva también
+				local connAct2 = nueva.Activated:Connect(function() end)
+				table.insert(conexionesProteccion, connAct2)
+				nueva.Parent = bp
+			end
+		end
+	end)
+	table.insert(conexionesProteccion, connUnequip)
+end
 
 local function activarProteccion()
 	if proteccionActiva then return end
@@ -68,52 +98,46 @@ local function activarProteccion()
 
 	local backpack = localPlayer:WaitForChild("Backpack")
 
-	-- Cuando llega una tool nueva al Backpack, la guardamos y protegemos
+	-- Proteger tools que ya existen
+	for _, tool in ipairs(backpack:GetChildren()) do
+		protegerTool(tool)
+	end
+
+	-- Proteger tools nuevas que lleguen
 	local connAdd = backpack.ChildAdded:Connect(function(hijo)
-		if hijo:IsA("Tool") then
-			-- Clonar y guardar
-			local clon = hijo:Clone()
-			toolsProtegidas[hijo.Name] = clon
-
-			-- Si alguien la quita del Backpack, la devolvemos
-			local connRemove = backpack.ChildRemoved:Connect(function(quitado)
-				if quitado.Name == hijo.Name then
-					task.wait(0.1)
-					-- Verificar que no esté en el Backpack ni en el Character
-					local bp = localPlayer:FindFirstChild("Backpack")
-					local char = localPlayer.Character
-					local enBp = bp and bp:FindFirstChild(quitado.Name)
-					local enChar = char and char:FindFirstChild(quitado.Name)
-
-					if not enBp and not enChar then
-						-- Restaurar la tool
-						local nueva = toolsProtegidas[quitado.Name]
-						if nueva then
-							local restaurada = nueva:Clone()
-							restaurada.Parent = bp
-						end
-					end
-				end
-			end)
-			table.insert(conexionesProteccion, connRemove)
-		end
+		task.wait(0.05)
+		protegerTool(hijo)
 	end)
 	table.insert(conexionesProteccion, connAdd)
 
-	-- También proteger las tools que ya están en el Backpack
-	for _, tool in ipairs(backpack:GetChildren()) do
-		if tool:IsA("Tool") then
-			toolsProtegidas[tool.Name] = tool:Clone()
+	-- Si una tool desaparece del Backpack, restaurarla
+	local connRemove = backpack.ChildRemoved:Connect(function(quitado)
+		if not quitado:IsA("Tool") then return end
+		task.wait(0.15)
+		local bp = localPlayer:FindFirstChild("Backpack")
+		local char = localPlayer.Character
+		local enBp   = bp   and bp:FindFirstChild(quitado.Name)
+		local enChar = char and char:FindFirstChild(quitado.Name)
+		if not enBp and not enChar then
+			local restaurada = toolsProtegidas[quitado.Name]
+			if restaurada then
+				local nueva = restaurada:Clone()
+				local connAct = nueva.Activated:Connect(function() end)
+				table.insert(conexionesProteccion, connAct)
+				nueva.Parent = bp
+			end
 		end
-	end
+	end)
+	table.insert(conexionesProteccion, connRemove)
 end
 
 local function desactivarProteccion()
 	proteccionActiva = false
 	for _, conn in ipairs(conexionesProteccion) do
-		conn:Disconnect()
+		pcall(function() conn:Disconnect() end)
 	end
 	conexionesProteccion = {}
+	toolsProtegidas = {}
 end
 
 -- ================================================================
@@ -151,7 +175,7 @@ hdrPatch.BackgroundColor3 = C.header
 hdrPatch.BorderSizePixel = 0 hdrPatch.ZIndex = 6
 
 mkLabel(hdr, {
-	text = "All Remotes Checker v3",
+	text = "All Remotes Checker v4",
 	font = Enum.Font.GothamBold, size = 13, color = C.text,
 	sz = UDim2.new(1,-46,1,0), pos = UDim2.new(0,12,0,0), z = 7,
 })
@@ -197,11 +221,11 @@ mkLabel(statsFrame, {
 local backpackLabel = mkLabel(statsFrame, {
 	text = "...",
 	font = Enum.Font.GothamBold, size = 10, color = C.blue,
-	sz = UDim2.new(0.65,0,0,14), pos = UDim2.new(0.33,0,0,34),
+	sz = UDim2.new(0.55,0,0,14), pos = UDim2.new(0.33,0,0,34),
 	trunc = Enum.TextTruncate.AtEnd, z = 7,
 })
 
--- Indicador de protección
+-- Indicador protección
 local proteccionBadge = Instance.new("Frame", statsFrame)
 proteccionBadge.Size = UDim2.new(0,110,0,14)
 proteccionBadge.Position = UDim2.new(1,-118,0,35)
@@ -372,8 +396,6 @@ local function diffSnapshot(antes, despues)
 			table.insert(cambios, nombre.." (nuevo): "..tostring(val))
 		end
 	end
-
-	-- Tools nuevas en Backpack
 	for nombre, cant in pairs(despues.backpack) do
 		local antesVal = antes.backpack[nombre] or 0
 		if cant > antesVal then
@@ -382,8 +404,6 @@ local function diffSnapshot(antes, despues)
 			table.insert(cambios, "Tool en Backpack: "..nombre.." x"..diff)
 		end
 	end
-
-	-- Tools nuevas en Character
 	for nombre, cant in pairs(despues.character) do
 		local antesVal = antes.character[nombre] or 0
 		if cant > antesVal then
@@ -395,7 +415,6 @@ local function diffSnapshot(antes, despues)
 			end
 		end
 	end
-
 	return cambios, toolsRecibidas
 end
 
@@ -407,9 +426,10 @@ local cardOrden = 0
 local function addCard(remote, estado, cambios, tools)
 	cardOrden = cardOrden + 1
 	local col = estado == "VULNERABLE" and C.red or C.green
+	local alturaExtra = #tools > 0 and 16 or 0
 
 	local card = Instance.new("Frame", scroll)
-	card.Size = UDim2.new(1,0,0, #tools > 0 and 72 or 58)
+	card.Size = UDim2.new(1,0,0,58 + alturaExtra)
 	card.BackgroundColor3 = C.card
 	card.BorderSizePixel = 0
 	card.LayoutOrder = cardOrden
@@ -465,7 +485,9 @@ local function addCard(remote, estado, cambios, tools)
 		trunc = Enum.TextTruncate.AtEnd, z = 8,
 	})
 
-	local cambioTexto = #cambios > 0 and table.concat(cambios, "  |  ") or "Sin cambios detectados"
+	local cambioTexto = #cambios > 0
+		and table.concat(cambios, "  |  ")
+		or "Sin cambios detectados"
 	mkLabel(card, {
 		text = cambioTexto,
 		font = Enum.Font.GothamBold, size = 9,
@@ -491,7 +513,7 @@ local function addCard(remote, estado, cambios, tools)
 end
 
 -- ================================================================
--- Helpers display
+-- Display helpers
 -- ================================================================
 local function getStatsTexto()
 	local ls = localPlayer:FindFirstChild("leaderstats")
@@ -530,7 +552,7 @@ scanAllBtn.MouseButton1Click:Connect(function()
 	if escaneando then return end
 	escaneando = true
 
-	-- Activar protección de tools
+	-- Activar protección
 	activarProteccion()
 	proteccionBadge.BackgroundColor3 = Color3.fromRGB(20,50,30)
 	proteccionLabel.Text = "Proteccion: ON"
@@ -560,7 +582,8 @@ scanAllBtn.MouseButton1Click:Connect(function()
 	for i, remote in ipairs(remotes) do
 		local pct = i / #remotes
 		progressFill.Size = UDim2.new(pct, 0, 1, 0)
-		progressLabel.Text = string.format("Probando %d/%d — %s", i, #remotes, remote.Name)
+		progressLabel.Text = string.format(
+			"Probando %d/%d — %s", i, #remotes, remote.Name)
 
 		local antes = getSnapshot()
 
@@ -619,4 +642,4 @@ limpiarBtn.MouseButton1Click:Connect(function()
 	progressLabel.Text = "Listo para escanear"
 end)
 
-print("All Remotes Checker v3 listo — Proteccion de tools activa.")
+print("All Remotes Checker v4 listo — Tools protegidas contra uso y quitar.")
