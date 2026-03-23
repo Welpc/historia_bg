@@ -1,4 +1,4 @@
--- LeaderstatsEditor LocalScript
+-- LeaderstatsEditor LocalScrip
 -- Pon este script en StarterPlayerScripts o dentro de un ScreenGui en StarterGui
 
 local Players = gameGetService(Players)
