@@ -1,5 +1,5 @@
 -- ============================================================
---  AllRemotes_Checker.lua
+--  AllRemotes_Checker.lu
 --  Prueba TODOS los RemoteEvents y RemoteFunctions del juego
 --  y muestra si cada uno es SEGURO o VULNERABLE
 -- ============================================================
