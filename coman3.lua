@@ -1,12 +1,13 @@
 -- ============================================================
---  AllRemotes_Checker_v2.lua
+--  AllRemotes_Checker_v3.lua
 --  Prueba TODOS los remotes del juego
 --  Detecta cambios en: leaderstats, Backpack y Character
+--  Las tools recibidas se guardan y NO se pueden quitar
 -- ============================================================
 
-local Players     = game:GetService("Players")
-local localPlayer = Players.LocalPlayer
-local playerGui   = localPlayer:WaitForChild("PlayerGui")
+local Players          = game:GetService("Players")
+local localPlayer      = Players.LocalPlayer
+local playerGui        = localPlayer:WaitForChild("PlayerGui")
 
 if playerGui:FindFirstChild("AllRemotesUI") then
 	playerGui.AllRemotesUI:Destroy()
@@ -52,9 +53,72 @@ local function mkLabel(parent, props)
 	return l
 end
 
--- ----------------------------------------------------------------
+-- ================================================================
+-- SISTEMA DE PROTECCION DE TOOLS
+-- Guarda las tools recibidas en una carpeta segura
+-- y las restaura si alguien intenta quitarlas
+-- ================================================================
+local toolsProtegidas = {} -- nombre -> tool clonada
+local proteccionActiva = false
+local conexionesProteccion = {}
+
+local function activarProteccion()
+	if proteccionActiva then return end
+	proteccionActiva = true
+
+	local backpack = localPlayer:WaitForChild("Backpack")
+
+	-- Cuando llega una tool nueva al Backpack, la guardamos y protegemos
+	local connAdd = backpack.ChildAdded:Connect(function(hijo)
+		if hijo:IsA("Tool") then
+			-- Clonar y guardar
+			local clon = hijo:Clone()
+			toolsProtegidas[hijo.Name] = clon
+
+			-- Si alguien la quita del Backpack, la devolvemos
+			local connRemove = backpack.ChildRemoved:Connect(function(quitado)
+				if quitado.Name == hijo.Name then
+					task.wait(0.1)
+					-- Verificar que no esté en el Backpack ni en el Character
+					local bp = localPlayer:FindFirstChild("Backpack")
+					local char = localPlayer.Character
+					local enBp = bp and bp:FindFirstChild(quitado.Name)
+					local enChar = char and char:FindFirstChild(quitado.Name)
+
+					if not enBp and not enChar then
+						-- Restaurar la tool
+						local nueva = toolsProtegidas[quitado.Name]
+						if nueva then
+							local restaurada = nueva:Clone()
+							restaurada.Parent = bp
+						end
+					end
+				end
+			end)
+			table.insert(conexionesProteccion, connRemove)
+		end
+	end)
+	table.insert(conexionesProteccion, connAdd)
+
+	-- También proteger las tools que ya están en el Backpack
+	for _, tool in ipairs(backpack:GetChildren()) do
+		if tool:IsA("Tool") then
+			toolsProtegidas[tool.Name] = tool:Clone()
+		end
+	end
+end
+
+local function desactivarProteccion()
+	proteccionActiva = false
+	for _, conn in ipairs(conexionesProteccion) do
+		conn:Disconnect()
+	end
+	conexionesProteccion = {}
+end
+
+-- ================================================================
 -- ScreenGui
--- ----------------------------------------------------------------
+-- ================================================================
 local sg = Instance.new("ScreenGui")
 sg.Name = "AllRemotesUI"
 sg.ResetOnSpawn = false
@@ -87,7 +151,7 @@ hdrPatch.BackgroundColor3 = C.header
 hdrPatch.BorderSizePixel = 0 hdrPatch.ZIndex = 6
 
 mkLabel(hdr, {
-	text = "All Remotes Checker v2",
+	text = "All Remotes Checker v3",
 	font = Enum.Font.GothamBold, size = 13, color = C.text,
 	sz = UDim2.new(1,-46,1,0), pos = UDim2.new(0,12,0,0), z = 7,
 })
@@ -100,7 +164,10 @@ closeBtn.Text = "X" closeBtn.TextColor3 = C.white
 closeBtn.TextSize = 11 closeBtn.Font = Enum.Font.GothamBold
 closeBtn.BorderSizePixel = 0 closeBtn.ZIndex = 8
 corner(closeBtn, 6)
-closeBtn.MouseButton1Click:Connect(function() sg:Destroy() end)
+closeBtn.MouseButton1Click:Connect(function()
+	desactivarProteccion()
+	sg:Destroy()
+end)
 
 -- Stats en tiempo real
 local statsFrame = Instance.new("Frame", main)
@@ -122,17 +189,30 @@ local statsValLabel = mkLabel(statsFrame, {
 	sz = UDim2.new(1,-10,0,16), pos = UDim2.new(0,10,0,16),
 	trunc = Enum.TextTruncate.AtEnd, z = 7,
 })
-
 mkLabel(statsFrame, {
 	text = "BACKPACK",
 	font = Enum.Font.GothamBold, size = 9, color = C.dim,
-	sz = UDim2.new(0.4,-10,0,14), pos = UDim2.new(0,10,0,34), z = 7,
+	sz = UDim2.new(0.35,-10,0,14), pos = UDim2.new(0,10,0,34), z = 7,
 })
 local backpackLabel = mkLabel(statsFrame, {
 	text = "...",
 	font = Enum.Font.GothamBold, size = 10, color = C.blue,
-	sz = UDim2.new(0.6,0,0,14), pos = UDim2.new(0.38,0,0,34),
+	sz = UDim2.new(0.65,0,0,14), pos = UDim2.new(0.33,0,0,34),
 	trunc = Enum.TextTruncate.AtEnd, z = 7,
+})
+
+-- Indicador de protección
+local proteccionBadge = Instance.new("Frame", statsFrame)
+proteccionBadge.Size = UDim2.new(0,110,0,14)
+proteccionBadge.Position = UDim2.new(1,-118,0,35)
+proteccionBadge.BackgroundColor3 = Color3.fromRGB(35,35,52)
+proteccionBadge.BorderSizePixel = 0 proteccionBadge.ZIndex = 8
+corner(proteccionBadge, 4)
+local proteccionLabel = mkLabel(proteccionBadge, {
+	text = "Proteccion: OFF",
+	font = Enum.Font.GothamBold, size = 8, color = C.dim,
+	sz = UDim2.new(1,0,1,0),
+	xa = Enum.TextXAlignment.Center, z = 9,
 })
 
 -- Barra de progreso
@@ -177,7 +257,6 @@ local counterDefs = {
 	{key="seguro", label="SEGURO",     color=C.green},
 	{key="tools",  label="DIO TOOLS",  color=C.yellow},
 }
-
 for i, def in ipairs(counterDefs) do
 	local cell = Instance.new("Frame", resumeFrame)
 	cell.Size = UDim2.new(0.25,0,1,0)
@@ -246,30 +325,25 @@ limpiarBtn.BorderSizePixel = 0 limpiarBtn.ZIndex = 7
 corner(limpiarBtn, 6)
 stroke(limpiarBtn, C.border, 1)
 
--- ----------------------------------------------------------------
--- Snapshot del estado actual del jugador
--- (leaderstats + backpack + character tools)
--- ----------------------------------------------------------------
+-- ================================================================
+-- Snapshot
+-- ================================================================
 local function getSnapshot()
 	local snap = { stats = {}, backpack = {}, character = {} }
-
-	-- Leaderstats
 	local ls = localPlayer:FindFirstChild("leaderstats")
 	if ls then
 		for _, s in ipairs(ls:GetChildren()) do
 			snap.stats[s.Name] = s.Value
 		end
 	end
-
-	-- Backpack
 	local bp = localPlayer:FindFirstChild("Backpack")
 	if bp then
 		for _, t in ipairs(bp:GetChildren()) do
-			snap.backpack[t.Name] = (snap.backpack[t.Name] or 0) + 1
+			if t:IsA("Tool") then
+				snap.backpack[t.Name] = (snap.backpack[t.Name] or 0) + 1
+			end
 		end
 	end
-
-	-- Character tools
 	local char = localPlayer.Character
 	if char then
 		for _, t in ipairs(char:GetChildren()) do
@@ -278,7 +352,6 @@ local function getSnapshot()
 			end
 		end
 	end
-
 	return snap
 end
 
@@ -286,7 +359,6 @@ local function diffSnapshot(antes, despues)
 	local cambios = {}
 	local toolsRecibidas = {}
 
-	-- Diferencia en leaderstats
 	for nombre, valAntes in pairs(antes.stats) do
 		local valDespues = despues.stats[nombre] or valAntes
 		local diff = valDespues - valAntes
@@ -295,11 +367,9 @@ local function diffSnapshot(antes, despues)
 			table.insert(cambios, nombre..": "..signo..diff)
 		end
 	end
-
-	-- Nuevas stats que no existían antes
 	for nombre, val in pairs(despues.stats) do
 		if not antes.stats[nombre] then
-			table.insert(cambios, nombre.." (nuevo): "..val)
+			table.insert(cambios, nombre.." (nuevo): "..tostring(val))
 		end
 	end
 
@@ -309,7 +379,7 @@ local function diffSnapshot(antes, despues)
 		if cant > antesVal then
 			local diff = cant - antesVal
 			table.insert(toolsRecibidas, nombre.." x"..diff)
-			table.insert(cambios, "Tool recibida: "..nombre.." x"..diff)
+			table.insert(cambios, "Tool en Backpack: "..nombre.." x"..diff)
 		end
 	end
 
@@ -318,8 +388,9 @@ local function diffSnapshot(antes, despues)
 		local antesVal = antes.character[nombre] or 0
 		if cant > antesVal then
 			local diff = cant - antesVal
-			if not table.find(toolsRecibidas, nombre.." x"..diff) then
-				table.insert(toolsRecibidas, nombre.." x"..diff)
+			local entry = nombre.." x"..diff
+			if not table.find(toolsRecibidas, entry) then
+				table.insert(toolsRecibidas, entry)
 				table.insert(cambios, "Tool equipada: "..nombre.." x"..diff)
 			end
 		end
@@ -328,9 +399,9 @@ local function diffSnapshot(antes, despues)
 	return cambios, toolsRecibidas
 end
 
--- ----------------------------------------------------------------
+-- ================================================================
 -- Tarjeta de resultado
--- ----------------------------------------------------------------
+-- ================================================================
 local cardOrden = 0
 
 local function addCard(remote, estado, cambios, tools)
@@ -338,7 +409,7 @@ local function addCard(remote, estado, cambios, tools)
 	local col = estado == "VULNERABLE" and C.red or C.green
 
 	local card = Instance.new("Frame", scroll)
-	card.Size = UDim2.new(1,0,0,70)
+	card.Size = UDim2.new(1,0,0, #tools > 0 and 72 or 58)
 	card.BackgroundColor3 = C.card
 	card.BorderSizePixel = 0
 	card.LayoutOrder = cardOrden
@@ -346,7 +417,6 @@ local function addCard(remote, estado, cambios, tools)
 	corner(card, 7)
 	stroke(card, estado == "VULNERABLE" and C.red or C.border, 1)
 
-	-- Barra lateral
 	local barra = Instance.new("Frame", card)
 	barra.Size = UDim2.new(0,3,1,-10)
 	barra.Position = UDim2.new(0,0,0,5)
@@ -354,7 +424,6 @@ local function addCard(remote, estado, cambios, tools)
 	barra.BorderSizePixel = 0 barra.ZIndex = 8
 	corner(barra, 3)
 
-	-- Badge estado
 	local badge = Instance.new("Frame", card)
 	badge.Size = UDim2.new(0,80,0,16)
 	badge.Position = UDim2.new(0,10,0,6)
@@ -368,7 +437,6 @@ local function addCard(remote, estado, cambios, tools)
 		xa = Enum.TextXAlignment.Center, z = 9,
 	})
 
-	-- Badge tipo
 	local tipoBadge = Instance.new("Frame", card)
 	tipoBadge.Size = UDim2.new(0,60,0,16)
 	tipoBadge.Position = UDim2.new(0,96,0,6)
@@ -382,7 +450,6 @@ local function addCard(remote, estado, cambios, tools)
 		xa = Enum.TextXAlignment.Center, z = 9,
 	})
 
-	-- Nombre
 	mkLabel(card, {
 		text = remote.Name,
 		font = Enum.Font.GothamBold, size = 11, color = C.text,
@@ -390,8 +457,6 @@ local function addCard(remote, estado, cambios, tools)
 		pos = UDim2.new(0,162,0,5),
 		trunc = Enum.TextTruncate.AtEnd, z = 8,
 	})
-
-	-- Ruta
 	mkLabel(card, {
 		text = "Ruta: "..remote:GetFullName(),
 		size = 9, color = C.dim,
@@ -400,11 +465,7 @@ local function addCard(remote, estado, cambios, tools)
 		trunc = Enum.TextTruncate.AtEnd, z = 8,
 	})
 
-	-- Cambios detectados
-	local cambioTexto = "Sin cambios detectados"
-	if #cambios > 0 then
-		cambioTexto = table.concat(cambios, "  |  ")
-	end
+	local cambioTexto = #cambios > 0 and table.concat(cambios, "  |  ") or "Sin cambios detectados"
 	mkLabel(card, {
 		text = cambioTexto,
 		font = Enum.Font.GothamBold, size = 9,
@@ -414,26 +475,24 @@ local function addCard(remote, estado, cambios, tools)
 		trunc = Enum.TextTruncate.AtEnd, z = 8,
 	})
 
-	-- Tools recibidas
 	if #tools > 0 then
 		mkLabel(card, {
-			text = "Tools: "..table.concat(tools, ", "),
+			text = "Tools guardadas: "..table.concat(tools, ", "),
 			font = Enum.Font.GothamBold, size = 9,
 			color = C.yellow,
 			sz = UDim2.new(1,-16,0,14),
-			pos = UDim2.new(0,10,0,54),
+			pos = UDim2.new(0,10,0,55),
 			trunc = Enum.TextTruncate.AtEnd, z = 8,
 		})
-		card.Size = UDim2.new(1,0,0,72)
 	end
 
 	task.wait()
 	scroll.CanvasPosition = Vector2.new(0, math.huge)
 end
 
--- ----------------------------------------------------------------
--- Helpers de display
--- ----------------------------------------------------------------
+-- ================================================================
+-- Helpers display
+-- ================================================================
 local function getStatsTexto()
 	local ls = localPlayer:FindFirstChild("leaderstats")
 	if not ls then return "Sin leaderstats" end
@@ -446,15 +505,14 @@ end
 
 local function getBackpackTexto()
 	local bp = localPlayer:FindFirstChild("Backpack")
-	if not bp then return "Backpack no encontrado" end
+	if not bp then return "No encontrado" end
 	local tools = {}
 	for _, t in ipairs(bp:GetChildren()) do
-		table.insert(tools, t.Name)
+		if t:IsA("Tool") then table.insert(tools, t.Name) end
 	end
 	return #tools > 0 and table.concat(tools, ", ") or "Vacio"
 end
 
--- Stats en tiempo real
 task.spawn(function()
 	while sg.Parent do
 		statsValLabel.Text = getStatsTexto()
@@ -463,14 +521,20 @@ task.spawn(function()
 	end
 end)
 
--- ----------------------------------------------------------------
+-- ================================================================
 -- ESCANEO PRINCIPAL
--- ----------------------------------------------------------------
+-- ================================================================
 local escaneando = false
 
 scanAllBtn.MouseButton1Click:Connect(function()
 	if escaneando then return end
 	escaneando = true
+
+	-- Activar protección de tools
+	activarProteccion()
+	proteccionBadge.BackgroundColor3 = Color3.fromRGB(20,50,30)
+	proteccionLabel.Text = "Proteccion: ON"
+	proteccionLabel.TextColor3 = C.green
 
 	for _, ch in ipairs(scroll:GetChildren()) do
 		if ch:IsA("Frame") then ch:Destroy() end
@@ -516,17 +580,11 @@ scanAllBtn.MouseButton1Click:Connect(function()
 
 		local despues = getSnapshot()
 		local cambios, tools = diffSnapshot(antes, despues)
-
 		local estado = #cambios > 0 and "VULNERABLE" or "SEGURO"
 
-		if estado == "VULNERABLE" then
-			cVuln = cVuln + 1
-		else
-			cSeguro = cSeguro + 1
-		end
-		if #tools > 0 then
-			cTools = cTools + 1
-		end
+		if estado == "VULNERABLE" then cVuln = cVuln + 1
+		else cSeguro = cSeguro + 1 end
+		if #tools > 0 then cTools = cTools + 1 end
 
 		cTotal = cTotal + 1
 		counters.total.Text  = tostring(cTotal)
@@ -561,4 +619,4 @@ limpiarBtn.MouseButton1Click:Connect(function()
 	progressLabel.Text = "Listo para escanear"
 end)
 
-print("All Remotes Checker v2 listo.")
+print("All Remotes Checker v3 listo — Proteccion de tools activa.")
