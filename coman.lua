@@ -1,549 +1,112 @@
--- ══════════════════════════════════════════════════════════════
---  LeaderstatsEditor — EJECUTADOR
---  Synapse X, KRNL, Fluxus, Solara, etc.
--- ══════════════════════════════════════════════════════════════
+-- Script para Roblox que añade un botón para descargar la parte cliente del juego actual
+-- ADVERTENCIA: Solo funciona en ejecutores de Roblox (exploits). No es un script de Roblox Studio.
+-- El archivo descargado NO incluye scripts de servidor (ServerScriptService), solo la parte visible en el cliente.
+-- Para abrirlo, usa Roblox Studio y luego exporta lo que necesites.
 
-local Players           = game:GetService("Players")
-local UIS               = game:GetService("UserInputService")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local LocalPlayer       = Players.LocalPlayer
+local Players = game:GetService("Players")
+local LocalPlayer = Players.LocalPlayer
 
--- Destruye GUI anterior
-pcall(function() game:GetService("CoreGui"):FindFirstChild("LeaderstatsEditorGUI"):Destroy() end)
-pcall(function() LocalPlayer.PlayerGui:FindFirstChild("LeaderstatsEditorGUI"):Destroy() end)
+-- ============================================================
+-- 1. CREAR LA INTERFAZ (GUI) CON EL BOTÓN DE DESCARGA
+-- ============================================================
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "GameDownloader"
+screenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
 
--- ══════════════════════════════════════════
---  SCANNER
--- ══════════════════════════════════════════
-local function getAllRemotes(parent, list, depth)
-	depth = depth or 0
-	if depth > 8 then return list end
-	list = list or {}
-	local ok, children = pcall(function() return parent:GetChildren() end)
-	if not ok then return list end
-	for _, obj in ipairs(children) do
-		if obj:IsA("RemoteEvent") or obj:IsA("RemoteFunction") then
-			table.insert(list, obj)
-		end
-		getAllRemotes(obj, list, depth + 1)
-	end
-	return list
+-- Frame principal (contenedor del botón)
+local mainFrame = Instance.new("Frame")
+mainFrame.Size = UDim2.new(0, 200, 0, 80)
+mainFrame.Position = UDim2.new(0.5, -100, 0.1, 0)
+mainFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 40)
+mainFrame.BorderSizePixel = 0
+mainFrame.Parent = screenGui
+
+-- Esquinas redondeadas
+local corner = Instance.new("UICorner")
+corner.CornerRadius = UDim.new(0, 12)
+corner.Parent = mainFrame
+
+-- Título
+local title = Instance.new("TextLabel")
+title.Size = UDim2.new(1, 0, 0, 25)
+title.Position = UDim2.new(0, 0, 0, 5)
+title.BackgroundTransparency = 1
+title.Text = "Descargador de Juegos"
+title.TextColor3 = Color3.fromRGB(200, 220, 255)
+title.Font = Enum.Font.SourceSansBold
+title.TextSize = 16
+title.Parent = mainFrame
+
+-- Botón de descarga
+local downloadButton = Instance.new("TextButton")
+downloadButton.Size = UDim2.new(0.9, 0, 0, 35)
+downloadButton.Position = UDim2.new(0.05, 0, 0, 35)
+downloadButton.BackgroundColor3 = Color3.fromRGB(0, 120, 215)
+downloadButton.Text = "DESCARGAR JUEGO"
+downloadButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+downloadButton.Font = Enum.Font.SourceSansBold
+downloadButton.TextSize = 14
+downloadButton.Parent = mainFrame
+
+-- Esquinas redondeadas del botón
+local buttonCorner = Instance.new("UICorner")
+buttonCorner.CornerRadius = UDim.new(0, 8)
+buttonCorner.Parent = downloadButton
+
+-- ============================================================
+-- 2. FUNCIÓN PRINCIPAL: CARGAR Y EJECUTAR UniversalSynSaveInstance
+-- ============================================================
+local function downloadGame()
+    -- Cambiar el texto del botón para indicar progreso
+    downloadButton.Text = "CARGANDO..."
+    downloadButton.BackgroundColor3 = Color3.fromRGB(255, 165, 0)
+    task.wait(0.1)
+
+    -- Cargar el script UniversalSynSaveInstance desde GitHub
+    local success, err = pcall(function()
+        local Params = {
+            RepoURL = "https://raw.githubusercontent.com/luau/UniversalSynSaveInstance/main/",
+            SSI = "saveinstance",
+        }
+        local synsaveinstance = loadstring(game:HttpGet(Params.RepoURL .. Params.SSI .. ".luau", true), Params.SSI)()
+        local Options = {
+            -- Modo de guardado: "full" para guardar todo lo posible
+            Mode = "full",
+            -- Guardar scripts locales (no de servidor)
+            SavePlayers = true,
+            -- Ignorar propiedades por defecto para reducir tamaño
+            IgnoreDefaultProps = false,
+            -- Incluir scripts (decompilados si es posible)
+            Decompile = true,
+            -- Ruta del archivo (puede cambiarse)
+            FilePath = "game_dump.rbxlx",
+            -- Mostrar estado en la consola
+            ShowStatus = true,
+        }
+        synsaveinstance(Options)
+    end)
+
+    if success then
+        downloadButton.Text = "¡DESCARGADO!"
+        downloadButton.BackgroundColor3 = Color3.fromRGB(0, 180, 0)
+        -- Restaurar después de 3 segundos
+        task.wait(3)
+        downloadButton.Text = "DESCARGAR JUEGO"
+        downloadButton.BackgroundColor3 = Color3.fromRGB(0, 120, 215)
+    else
+        downloadButton.Text = "ERROR - Ver consola"
+        downloadButton.BackgroundColor3 = Color3.fromRGB(200, 0, 0)
+        warn("Error al descargar: " .. tostring(err))
+        task.wait(3)
+        downloadButton.Text = "DESCARGAR JUEGO"
+        downloadButton.BackgroundColor3 = Color3.fromRGB(0, 120, 215)
+    end
 end
 
-local function scanAllRemotes()
-	local list = {}
-	getAllRemotes(ReplicatedStorage, list)
-	getAllRemotes(workspace, list)
-	return list
-end
+-- ============================================================
+-- 3. CONECTAR EL BOTÓN A LA FUNCIÓN
+-- ============================================================
+downloadButton.MouseButton1Click:Connect(downloadGame)
 
-local FORMATS = {
-	function(p,s,v) return {p.Name,   s, v} end,
-	function(p,s,v) return {p,        s, v} end,
-	function(p,s,v) return {s,           v} end,
-	function(p,s,v) return {p.UserId, s, v} end,
-	function(p,s,v) return {p.Name,   v, s} end,
-	function(p,s,v) return {p,        v, s} end,
-	function(p,s,v) return {p.Name,      v} end,
-	function(p,s,v) return {p,           v} end,
-	function(p,s,v) return {p.UserId,    v} end,
-}
-
-local function tryFire(remote, args)
-	if not remote or not remote.Parent then return false end
-	local ok = pcall(function()
-		if remote:IsA("RemoteEvent") then
-			remote:FireServer(table.unpack(args))
-		else
-			remote:InvokeServer(table.unpack(args))
-		end
-	end)
-	return ok
-end
-
--- ══════════════════════════════════════════
---  DOBLE MÉTODO PARA DETECTAR CAMBIO
---  Método 1: stat.Changed event
---  Método 2: polling directo del valor cada frame
--- ══════════════════════════════════════════
-local function waitForValueChange(stat, targetVal, timeout)
-	timeout = timeout or 1.5
-	local changed = false
-
-	-- Método 1: evento Changed
-	local conn = stat.Changed:Connect(function(v)
-		if tonumber(v) == tonumber(targetVal) then
-			changed = true
-		end
-	end)
-
-	-- Método 2: polling directo (por si el evento no llega en ejecutador)
-	local elapsed = 0
-	while not changed and elapsed < timeout do
-		task.wait(0.05)
-		elapsed = elapsed + 0.05
-		-- lee directo el valor del objeto sin depender del evento
-		local ok, val = pcall(function() return stat.Value end)
-		if ok and tonumber(val) == tonumber(targetVal) then
-			changed = true
-		end
-	end
-
-	conn:Disconnect()
-	return changed
-end
-
--- ══════════════════════════════════════════
---  AUTO FIRE — dispara y verifica con doble método
--- ══════════════════════════════════════════
-local cachedRemote = nil
-local cachedFmt    = nil
-
-local function autoFire(plr, stat, num, onProgress)
-	local remotes = scanAllRemotes()
-	local total   = #remotes * #FORMATS
-	local tried   = 0
-	local firedOk = {}
-
-	-- Intenta cache primero
-	if cachedRemote and cachedRemote.Parent and cachedFmt then
-		local args = cachedFmt(plr, stat.Name, num)
-		tryFire(cachedRemote, args)
-		if waitForValueChange(stat, num, 0.8) then
-			return "confirmed", cachedRemote:GetFullName()
-		end
-		cachedRemote = nil; cachedFmt = nil
-	end
-
-	-- Prueba todos los remotes
-	for _, remote in ipairs(remotes) do
-		for _, fmt in ipairs(FORMATS) do
-			tried = tried + 1
-			if onProgress then onProgress(tried, total, remote.Name) end
-
-			local args = fmt(plr, stat.Name, num)
-			local fired = tryFire(remote, args)
-
-			if fired then
-				table.insert(firedOk, {remote = remote, fmt = fmt, path = remote:GetFullName()})
-			end
-
-			if tried % 8 == 0 then task.wait() end
-		end
-	end
-
-	-- Ahora verifica con doble método si alguno lo aplicó
-	-- Espera un poco más después de haber disparado todos
-	task.wait(0.2)
-
-	-- Método 1+2 combinado: lee el valor directo
-	local ok, currentVal = pcall(function() return stat.Value end)
-	if ok and tonumber(currentVal) == num then
-		-- Encontró cuál fue: el primero que disparó sin error
-		if #firedOk > 0 then
-			cachedRemote = firedOk[1].remote
-			cachedFmt    = firedOk[1].fmt
-			return "confirmed", firedOk[1].path
-		end
-		return "confirmed", "desconocido"
-	end
-
-	-- Si hay remotes que dispararon sin error pero el valor aún no cambió
-	-- espera un poco más con polling activo
-	if #firedOk > 0 then
-		local changed = waitForValueChange(stat, num, 1.0)
-		if changed then
-			cachedRemote = firedOk[1].remote
-			cachedFmt    = firedOk[1].fmt
-			return "confirmed", firedOk[1].path
-		end
-		-- disparó pero no cambió el valor
-		return "fired", firedOk[1].path .. " (+" .. #firedOk .. " remotes)"
-	end
-
-	return "none", "ningún remote aceptó (" .. #remotes .. " probados)"
-end
-
--- ══════════════════════════════════════════
---  GUI
--- ══════════════════════════════════════════
-local ScreenGui = Instance.new("ScreenGui")
-ScreenGui.Name = "LeaderstatsEditorGUI"
-ScreenGui.ResetOnSpawn = false
-ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-ScreenGui.DisplayOrder = 999
-
-local guiOk = false
-pcall(function() ScreenGui.Parent = game:GetService("CoreGui"); guiOk = true end)
-if not guiOk then ScreenGui.Parent = LocalPlayer:WaitForChild("PlayerGui") end
-
--- Toggle
-local ToggleBtn = Instance.new("TextButton")
-ToggleBtn.Size = UDim2.new(0,42,0,42)
-ToggleBtn.Position = UDim2.new(0,12,0.5,-21)
-ToggleBtn.BackgroundColor3 = Color3.fromRGB(30,215,96)
-ToggleBtn.Text = "💰"; ToggleBtn.TextSize = 20
-ToggleBtn.Font = Enum.Font.GothamBold
-ToggleBtn.BorderSizePixel = 0; ToggleBtn.AutoButtonColor = false
-ToggleBtn.Parent = ScreenGui
-Instance.new("UICorner", ToggleBtn).CornerRadius = UDim.new(1,0)
-
--- Frame
-local Frame = Instance.new("Frame")
-Frame.Size = UDim2.new(0,300,0,455)
-Frame.Position = UDim2.new(0,62,0.5,-227)
-Frame.BackgroundColor3 = Color3.fromRGB(12,12,18)
-Frame.BorderSizePixel = 0; Frame.Visible = false; Frame.Active = true
-Frame.Parent = ScreenGui
-Instance.new("UICorner", Frame).CornerRadius = UDim.new(0,12)
-local FStroke = Instance.new("UIStroke", Frame)
-FStroke.Color = Color3.fromRGB(30,215,96); FStroke.Thickness = 1.2
-
-local GlowBar = Instance.new("Frame", Frame)
-GlowBar.Size = UDim2.new(1,0,0,2)
-GlowBar.BackgroundColor3 = Color3.fromRGB(30,215,96); GlowBar.BorderSizePixel = 0
-Instance.new("UICorner", GlowBar).CornerRadius = UDim.new(0,12)
-
--- Header
-local Header = Instance.new("TextButton")
-Header.Size = UDim2.new(1,0,0,40)
-Header.BackgroundTransparency = 1; Header.Text = ""; Header.AutoButtonColor = false
-Header.Parent = Frame
-
-local Title = Instance.new("TextLabel", Header)
-Title.Size = UDim2.new(1,-40,1,0); Title.Position = UDim2.new(0,10,0,0)
-Title.BackgroundTransparency = 1; Title.Text = "⚡ Leaderstats Editor"
-Title.TextColor3 = Color3.fromRGB(255,255,255)
-Title.TextSize = 13; Title.Font = Enum.Font.GothamBold
-Title.TextXAlignment = Enum.TextXAlignment.Left
-
-local CloseBtn = Instance.new("TextButton", Header)
-CloseBtn.Size = UDim2.new(0,24,0,24); CloseBtn.Position = UDim2.new(1,-30,0.5,-12)
-CloseBtn.BackgroundColor3 = Color3.fromRGB(40,40,55)
-CloseBtn.Text = "✕"; CloseBtn.TextColor3 = Color3.fromRGB(160,160,160)
-CloseBtn.TextSize = 11; CloseBtn.Font = Enum.Font.GothamBold; CloseBtn.BorderSizePixel = 0
-Instance.new("UICorner", CloseBtn).CornerRadius = UDim.new(1,0)
-
-local function makeLabel(text, y)
-	local l = Instance.new("TextLabel", Frame)
-	l.Size = UDim2.new(1,-24,0,13); l.Position = UDim2.new(0,12,0,y)
-	l.BackgroundTransparency = 1; l.Text = text
-	l.TextColor3 = Color3.fromRGB(30,215,96)
-	l.TextSize = 9; l.Font = Enum.Font.GothamBold
-	l.TextXAlignment = Enum.TextXAlignment.Left
-	return l
-end
-
-makeLabel("JUGADOR", 46)
-local PlayerScroll = Instance.new("ScrollingFrame", Frame)
-PlayerScroll.Size = UDim2.new(1,-24,0,66); PlayerScroll.Position = UDim2.new(0,12,0,62)
-PlayerScroll.BackgroundColor3 = Color3.fromRGB(18,18,28); PlayerScroll.BorderSizePixel = 0
-PlayerScroll.ScrollBarThickness = 3; PlayerScroll.ScrollBarImageColor3 = Color3.fromRGB(30,215,96)
-PlayerScroll.CanvasSize = UDim2.new(0,0,0,0); PlayerScroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
-Instance.new("UICorner", PlayerScroll).CornerRadius = UDim.new(0,8)
-local PSL = Instance.new("UIListLayout", PlayerScroll)
-PSL.SortOrder = Enum.SortOrder.Name; PSL.Padding = UDim.new(0,3)
-local PSP = Instance.new("UIPadding", PlayerScroll)
-PSP.PaddingTop = UDim.new(0,4); PSP.PaddingLeft = UDim.new(0,4); PSP.PaddingRight = UDim.new(0,4)
-
-makeLabel("LEADERSTATS  —  edita y presiona ✔", 136)
-local StatsScroll = Instance.new("ScrollingFrame", Frame)
-StatsScroll.Size = UDim2.new(1,-24,0,240); StatsScroll.Position = UDim2.new(0,12,0,152)
-StatsScroll.BackgroundColor3 = Color3.fromRGB(18,18,28); StatsScroll.BorderSizePixel = 0
-StatsScroll.ScrollBarThickness = 3; StatsScroll.ScrollBarImageColor3 = Color3.fromRGB(30,215,96)
-StatsScroll.CanvasSize = UDim2.new(0,0,0,0); StatsScroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
-Instance.new("UICorner", StatsScroll).CornerRadius = UDim.new(0,8)
-local SSL = Instance.new("UIListLayout", StatsScroll)
-SSL.SortOrder = Enum.SortOrder.LayoutOrder; SSL.Padding = UDim.new(0,5)
-local SSP = Instance.new("UIPadding", StatsScroll)
-SSP.PaddingTop = UDim.new(0,6); SSP.PaddingLeft = UDim.new(0,6); SSP.PaddingRight = UDim.new(0,6)
-
-local NoStatsLabel = Instance.new("TextLabel", StatsScroll)
-NoStatsLabel.Size = UDim2.new(1,0,0,30); NoStatsLabel.BackgroundTransparency = 1
-NoStatsLabel.Text = "Selecciona un jugador..."
-NoStatsLabel.TextColor3 = Color3.fromRGB(70,70,90)
-NoStatsLabel.TextSize = 11; NoStatsLabel.Font = Enum.Font.Gotham
-
--- Barra progreso
-local ProgBg = Instance.new("Frame", Frame)
-ProgBg.Size = UDim2.new(1,-24,0,5); ProgBg.Position = UDim2.new(0,12,0,400)
-ProgBg.BackgroundColor3 = Color3.fromRGB(22,22,32); ProgBg.BorderSizePixel = 0
-Instance.new("UICorner", ProgBg).CornerRadius = UDim.new(1,0)
-local ProgFill = Instance.new("Frame", ProgBg)
-ProgFill.Size = UDim2.new(0,0,1,0)
-ProgFill.BackgroundColor3 = Color3.fromRGB(30,215,96); ProgFill.BorderSizePixel = 0
-Instance.new("UICorner", ProgFill).CornerRadius = UDim.new(1,0)
-
--- Método badge (muestra qué método detectó el cambio)
-local MethodBadge = Instance.new("TextLabel", Frame)
-MethodBadge.Size = UDim2.new(1,-24,0,13); MethodBadge.Position = UDim2.new(0,12,0,408)
-MethodBadge.BackgroundTransparency = 1; MethodBadge.Text = ""
-MethodBadge.TextColor3 = Color3.fromRGB(150,150,180)
-MethodBadge.TextSize = 8; MethodBadge.Font = Enum.Font.Gotham
-MethodBadge.TextXAlignment = Enum.TextXAlignment.Left
-
-local StatusLabel = Instance.new("TextLabel", Frame)
-StatusLabel.Size = UDim2.new(1,-24,0,14); StatusLabel.Position = UDim2.new(0,12,0,422)
-StatusLabel.BackgroundTransparency = 1; StatusLabel.Text = "Selecciona un jugador"
-StatusLabel.TextColor3 = Color3.fromRGB(70,70,90)
-StatusLabel.TextSize = 9; StatusLabel.Font = Enum.Font.Gotham
-StatusLabel.TextXAlignment = Enum.TextXAlignment.Left
-StatusLabel.TextTruncate = Enum.TextTruncate.AtEnd
-
-local RemoteLabel = Instance.new("TextLabel", Frame)
-RemoteLabel.Size = UDim2.new(1,-24,0,13); RemoteLabel.Position = UDim2.new(0,12,0,437)
-RemoteLabel.BackgroundTransparency = 1; RemoteLabel.Text = ""
-RemoteLabel.TextColor3 = Color3.fromRGB(80,180,255)
-RemoteLabel.TextSize = 8; RemoteLabel.Font = Enum.Font.Gotham
-RemoteLabel.TextXAlignment = Enum.TextXAlignment.Left
-RemoteLabel.TextTruncate = Enum.TextTruncate.AtEnd
-
-local function setStatus(msg, col)
-	StatusLabel.Text = msg
-	StatusLabel.TextColor3 = col or Color3.fromRGB(70,70,90)
-end
-
--- ── DRAG ─────────────────────────────────
-local dragging, dragStart, startPos = false, nil, nil
-Header.InputBegan:Connect(function(i)
-	if i.UserInputType == Enum.UserInputType.MouseButton1
-	or i.UserInputType == Enum.UserInputType.Touch then
-		dragging = true; dragStart = i.Position; startPos = Frame.Position
-	end
-end)
-UIS.InputChanged:Connect(function(i)
-	if dragging and (i.UserInputType == Enum.UserInputType.MouseMovement
-	or i.UserInputType == Enum.UserInputType.Touch) then
-		local d = i.Position - dragStart
-		Frame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset+d.X,
-			startPos.Y.Scale, startPos.Y.Offset+d.Y)
-	end
-end)
-UIS.InputEnded:Connect(function(i)
-	if i.UserInputType == Enum.UserInputType.MouseButton1
-	or i.UserInputType == Enum.UserInputType.Touch then dragging = false end
-end)
-
--- ══════════════════════════════════════════
---  FILAS DE STATS
--- ══════════════════════════════════════════
-local selectedPlayer = nil
-local playerButtons  = {}
-local statRows       = {}
-local busyStats      = {}
-
-local function clearStats()
-	for _, r in ipairs(statRows) do if r and r.Parent then r:Destroy() end end
-	statRows = {}
-	NoStatsLabel.Parent = StatsScroll
-	RemoteLabel.Text = ""; MethodBadge.Text = ""
-	setStatus("Selecciona un jugador")
-end
-
-local function makeStatRow(plr, stat, index)
-	NoStatsLabel.Parent = nil
-	local isNum = stat:IsA("IntValue") or stat:IsA("NumberValue")
-
-	local row = Instance.new("Frame", StatsScroll)
-	row.Size = UDim2.new(1,0,0,50)
-	row.BackgroundColor3 = Color3.fromRGB(20,20,32)
-	row.BorderSizePixel = 0; row.LayoutOrder = index
-	Instance.new("UICorner", row).CornerRadius = UDim.new(0,8)
-	local RS = Instance.new("UIStroke", row)
-	RS.Color = Color3.fromRGB(35,35,55); RS.Thickness = 1
-	table.insert(statRows, row)
-
-	local nameL = Instance.new("TextLabel", row)
-	nameL.Size = UDim2.new(0.52,0,0,20); nameL.Position = UDim2.new(0,10,0,6)
-	nameL.BackgroundTransparency = 1; nameL.Text = stat.Name
-	nameL.TextColor3 = Color3.fromRGB(30,215,96)
-	nameL.TextSize = 13; nameL.Font = Enum.Font.GothamBold
-	nameL.TextXAlignment = Enum.TextXAlignment.Left
-
-	local typeL = Instance.new("TextLabel", row)
-	typeL.Size = UDim2.new(0.52,0,0,13); typeL.Position = UDim2.new(0,10,0,28)
-	typeL.BackgroundTransparency = 1; typeL.Text = stat.ClassName
-	typeL.TextColor3 = Color3.fromRGB(50,50,72)
-	typeL.TextSize = 9; typeL.Font = Enum.Font.Gotham
-	typeL.TextXAlignment = Enum.TextXAlignment.Left
-
-	local valBox = Instance.new(isNum and "TextBox" or "TextLabel", row)
-	valBox.Size = UDim2.new(0,82,0,32); valBox.Position = UDim2.new(1,-120,0.5,-16)
-	valBox.BackgroundColor3 = Color3.fromRGB(14,14,22)
-	valBox.BackgroundTransparency = isNum and 0 or 1
-	valBox.Text = tostring(stat.Value)
-	valBox.TextColor3 = Color3.fromRGB(255,255,255)
-	valBox.TextSize = 13; valBox.Font = Enum.Font.GothamBold
-	valBox.BorderSizePixel = 0; valBox.ClearTextOnFocus = false
-	Instance.new("UICorner", valBox).CornerRadius = UDim.new(0,6)
-	local VS = Instance.new("UIStroke", valBox)
-	VS.Color = Color3.fromRGB(40,40,60); VS.Thickness = 1
-	Instance.new("UIPadding", valBox).PaddingLeft = UDim.new(0,6)
-	if isNum then
-		valBox.Focused:Connect(function() VS.Color = Color3.fromRGB(30,215,96) end)
-		valBox.FocusLost:Connect(function() VS.Color = Color3.fromRGB(40,40,60) end)
-	end
-
-	-- Polling activo: actualiza el valor mostrado leyendo directo el stat
-	task.spawn(function()
-		while row and row.Parent do
-			task.wait(0.5)
-			local focused = false
-			pcall(function() focused = valBox:IsFocused() end)
-			if not focused then
-				local ok, v = pcall(function() return stat.Value end)
-				if ok and valBox and valBox.Parent then
-					valBox.Text = tostring(v)
-				end
-			end
-		end
-	end)
-
-	local confirmBtn = Instance.new("TextButton", row)
-	confirmBtn.Size = UDim2.new(0,32,0,32); confirmBtn.Position = UDim2.new(1,-36,0.5,-16)
-	confirmBtn.BackgroundColor3 = isNum and Color3.fromRGB(20,80,35) or Color3.fromRGB(25,25,35)
-	confirmBtn.Text = isNum and "✔" or "—"
-	confirmBtn.TextColor3 = isNum and Color3.fromRGB(30,215,96) or Color3.fromRGB(50,50,70)
-	confirmBtn.TextSize = 15; confirmBtn.Font = Enum.Font.GothamBold
-	confirmBtn.BorderSizePixel = 0
-	Instance.new("UICorner", confirmBtn).CornerRadius = UDim.new(0,6)
-
-	if not isNum then return row end
-
-	confirmBtn.MouseButton1Click:Connect(function()
-		if busyStats[stat.Name] then return end
-
-		local num = tonumber(valBox.Text)
-		if not num then
-			valBox.Text = tostring(stat.Value)
-			setStatus("⚠️ Valor inválido", Color3.fromRGB(255,200,50)); return
-		end
-
-		local _, curVal = pcall(function() return stat.Value end)
-		if tonumber(curVal) == num then
-			setStatus("ℹ️ " .. stat.Name .. " ya vale " .. tostring(num), Color3.fromRGB(100,150,255)); return
-		end
-
-		busyStats[stat.Name] = true
-		confirmBtn.Text = "⏳"; confirmBtn.BackgroundColor3 = Color3.fromRGB(60,60,15)
-		RS.Color = Color3.fromRGB(180,180,40)
-		ProgFill.BackgroundColor3 = Color3.fromRGB(30,215,96)
-		ProgFill.Size = UDim2.new(0,0,1,0)
-		RemoteLabel.Text = ""; MethodBadge.Text = ""
-		setStatus("🔎 Buscando remote para " .. stat.Name .. "...", Color3.fromRGB(200,200,50))
-
-		task.spawn(function()
-			local status, result = autoFire(
-				plr, stat, num,
-				function(tried, total, remoteName)
-					ProgFill.Size = UDim2.new(tried/total, 0, 1, 0)
-					setStatus("🔎 " .. remoteName, Color3.fromRGB(160,160,50))
-				end
-			)
-
-			ProgFill.Size = UDim2.new(1,0,1,0)
-
-			if status == "confirmed" then
-				confirmBtn.Text = "✅"; confirmBtn.BackgroundColor3 = Color3.fromRGB(10,110,35)
-				RS.Color = Color3.fromRGB(30,215,96); VS.Color = Color3.fromRGB(30,215,96)
-				ProgFill.BackgroundColor3 = Color3.fromRGB(30,215,96)
-				setStatus("✅ " .. stat.Name .. " = " .. tostring(num), Color3.fromRGB(30,215,96))
-				RemoteLabel.Text = "🌐 " .. result
-				MethodBadge.Text = "Detectado via evento + polling directo"
-
-			elseif status == "fired" then
-				confirmBtn.Text = "📡"; confirmBtn.BackgroundColor3 = Color3.fromRGB(20,60,110)
-				RS.Color = Color3.fromRGB(80,150,255)
-				ProgFill.BackgroundColor3 = Color3.fromRGB(80,150,255)
-				setStatus("📡 Remote disparado — verifica si cambió ingame", Color3.fromRGB(80,180,255))
-				RemoteLabel.Text = result
-				MethodBadge.Text = "Remote aceptó pero replicación pendiente"
-
-			else
-				confirmBtn.Text = "❌"; confirmBtn.BackgroundColor3 = Color3.fromRGB(110,18,18)
-				RS.Color = Color3.fromRGB(200,40,40)
-				ProgFill.BackgroundColor3 = Color3.fromRGB(180,40,40)
-				setStatus("❌ " .. result, Color3.fromRGB(255,70,70))
-				MethodBadge.Text = "Sin remotes compatibles en este juego"
-			end
-
-			task.wait(2.5)
-			confirmBtn.Text = "✔"; confirmBtn.BackgroundColor3 = Color3.fromRGB(20,80,35)
-			confirmBtn.TextColor3 = Color3.fromRGB(30,215,96)
-			RS.Color = Color3.fromRGB(35,35,55); VS.Color = Color3.fromRGB(40,40,60)
-			ProgFill.Size = UDim2.new(0,0,1,0)
-			ProgFill.BackgroundColor3 = Color3.fromRGB(30,215,96)
-			busyStats[stat.Name] = nil
-		end)
-	end)
-
-	return row
-end
-
-local function loadStats(plr)
-	clearStats()
-	if not plr then return end
-	local ls = plr:FindFirstChild("leaderstats")
-	if not ls then NoStatsLabel.Text = plr.Name .. " no tiene leaderstats"; return end
-	local children = ls:GetChildren()
-	if #children == 0 then NoStatsLabel.Text = "Sin stats"; return end
-	for i, stat in ipairs(children) do
-		if stat:IsA("IntValue") or stat:IsA("NumberValue") or stat:IsA("StringValue") then
-			makeStatRow(plr, stat, i)
-		end
-	end
-end
-
-local function refreshPlayers()
-	for _, b in pairs(playerButtons) do b:Destroy() end
-	playerButtons = {}; selectedPlayer = nil; clearStats()
-	for _, plr in ipairs(Players:GetPlayers()) do
-		local btn = Instance.new("TextButton")
-		btn.Size = UDim2.new(1,0,0,26)
-		btn.BackgroundColor3 = Color3.fromRGB(28,28,40)
-		btn.Text = "👤  " .. plr.Name
-		btn.TextColor3 = Color3.fromRGB(210,210,210)
-		btn.TextSize = 11; btn.Font = Enum.Font.Gotham
-		btn.TextXAlignment = Enum.TextXAlignment.Left
-		btn.BorderSizePixel = 0; btn.Parent = PlayerScroll
-		Instance.new("UICorner", btn).CornerRadius = UDim.new(0,6)
-		local p = Instance.new("UIPadding", btn); p.PaddingLeft = UDim.new(0,8)
-		playerButtons[plr.Name] = btn
-		btn.MouseButton1Click:Connect(function()
-			for _, b in pairs(playerButtons) do
-				b.BackgroundColor3 = Color3.fromRGB(28,28,40)
-				b.TextColor3 = Color3.fromRGB(210,210,210)
-			end
-			btn.BackgroundColor3 = Color3.fromRGB(18,50,26)
-			btn.TextColor3 = Color3.fromRGB(30,215,96)
-			selectedPlayer = plr
-			loadStats(plr)
-			setStatus("Jugador: " .. plr.Name, Color3.fromRGB(30,215,96))
-		end)
-	end
-end
-
-local open = false
-ToggleBtn.MouseButton1Click:Connect(function()
-	open = not open
-	Frame.Visible = open
-	ToggleBtn.BackgroundColor3 = open and Color3.fromRGB(18,160,65) or Color3.fromRGB(30,215,96)
-	if open then refreshPlayers() end
-end)
-CloseBtn.MouseButton1Click:Connect(function()
-	open = false; Frame.Visible = false
-	ToggleBtn.BackgroundColor3 = Color3.fromRGB(30,215,96)
-end)
-ToggleBtn.MouseEnter:Connect(function() ToggleBtn.BackgroundColor3 = Color3.fromRGB(45,230,110) end)
-ToggleBtn.MouseLeave:Connect(function()
-	ToggleBtn.BackgroundColor3 = open and Color3.fromRGB(18,160,65) or Color3.fromRGB(30,215,96)
-end)
-Players.PlayerAdded:Connect(function() if open then refreshPlayers() end end)
-Players.PlayerRemoving:Connect(function(plr)
-	if open then
-		if selectedPlayer == plr then clearStats() end
-		refreshPlayers()
-	end
-end)
-
-print("[LeaderstatsEditor] Ejecutador listo ✓ — doble detección activa")
+print("[GameDownloader] Script cargado. Botón añadido a la pantalla.")
+print("[GameDownloader] ADVERTENCIA: Solo descarga la parte cliente. Los scripts de servidor NO se incluyen.")
