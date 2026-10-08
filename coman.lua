@@ -96,7 +96,9 @@ local sel, hl = nil, nil
 local selecting = false
 local moveStep, rotStep, scaleStep = 1, 15, 0.10
 local camMode = true
-local originals = {}
+local originals = setmetatable({}, {__mode = "k"})
+local pasting = false
+local setPasting -- se define en la pestaña Copiar
 
 local function valid()
 	return sel ~= nil and sel.Parent ~= nil
@@ -146,10 +148,10 @@ local infoName = label(info, "Ningún objeto seleccionado", UDim2.new(1, -16, 0,
 local infoPos = label(info, "Pulsa Seleccionar y toca un objeto", UDim2.new(1, -16, 0, 14), UDim2.new(0, 8, 0, 18), 10, C.dim)
 
 -- Pestañas
-local tabNames = {"Mover", "Rotar", "Escalar"}
+local tabNames = {"Mover", "Rotar", "Escalar", "Copiar"}
 local tabBtns, tabFrames = {}, {}
 for i, name in ipairs(tabNames) do
-	tabBtns[name] = button(body, name, UDim2.new(0, 74, 0, 28), UDim2.new(0, (i-1)*78, 0, 40), C.btn, 12)
+	tabBtns[name] = button(body, name, UDim2.new(0, 54, 0, 28), UDim2.new(0, (i-1)*58.67, 0, 40), C.btn, 11)
 	tabFrames[name] = new("Frame", {Size = UDim2.new(1, 0, 0, 150), Position = UDim2.new(0, 0, 0, 74), BackgroundTransparency = 1, Visible = false}, body)
 end
 local function showTab(name)
@@ -191,7 +193,7 @@ local function select_(obj)
 	sel = obj
 	if not obj then refresh() return end
 	hl = new("Highlight", {
-		FillColor = C.good, OutlineColor = Color3.new(1,1,1), FillTransparency = 0.55,
+		Name = "StudioHL", FillColor = C.good, OutlineColor = Color3.new(1,1,1), FillTransparency = 0.55,
 		DepthMode = Enum.HighlightDepthMode.AlwaysOnTop,
 	}, obj)
 	if not originals[obj] then
@@ -348,6 +350,7 @@ local rstBtn = button(body, "Reset", UDim2.new(0, 44, 0, 34), UDim2.new(0, 186, 
 -- (130 + 6 + 44 + 6 + 44 = 230)
 
 local function setSelecting(v)
+	if v and pasting then setPasting(false) end
 	selecting = v
 	selBtn.Text = v and "Toca un objeto…" or "Seleccionar"
 	local col = v and C.warn or C.good
@@ -366,10 +369,145 @@ end)
 rstBtn.MouseButton1Click:Connect(resetAll)
 
 -- ============================================================
+-- PESTAÑA COPIAR
+-- ============================================================
+local clip = nil
+local statusLbl, pasteTapBtn
+
+local function status(t)
+	if statusLbl then statusLbl.Text = t end
+end
+
+local function stripHL(o)
+	for _, d in ipairs(o:GetDescendants()) do
+		if d.Name == "StudioHL" then d:Destroy() end
+	end
+end
+
+-- Clona aunque el objeto tenga Archivable = false
+local function cloneObj(obj)
+	local changed = {}
+	local list = obj:GetDescendants()
+	table.insert(list, obj)
+	for _, d in ipairs(list) do
+		if not d.Archivable then
+			d.Archivable = true
+			table.insert(changed, d)
+		end
+	end
+	local ok, c = pcall(function() return obj:Clone() end)
+	for _, d in ipairs(changed) do
+		pcall(function() d.Archivable = false end)
+	end
+	if ok and c then
+		stripHL(c)
+		return c
+	end
+	return nil
+end
+
+local function copySel()
+	if not valid() then status("Selecciona algo primero") return end
+	local c = cloneObj(sel)
+	if not c then status("No se pudo copiar") return end
+	if clip then clip:Destroy() end
+	clip = c
+	status("Copiado: " .. sel.Name)
+end
+
+local function pasteAt(pos, normal)
+	if not clip then status("No hay nada copiado") return end
+	local c = clip:Clone()
+	c.Parent = workspace
+	local half = c:IsA("Model") and (c:GetExtentsSize().Y / 2) or (c.Size.Y / 2)
+	local cf = c:GetPivot()
+	local rot = cf - cf.Position
+	c:PivotTo(CFrame.new(pos + (normal or Vector3.yAxis) * half) * rot)
+	select_(c)
+	status("Pegado: " .. c.Name)
+end
+
+local function pasteFront()
+	if not clip then status("No hay nada copiado") return end
+	local char = LP.Character
+	local hrp = char and char:FindFirstChild("HumanoidRootPart")
+	if not hrp then status("No encuentro tu personaje") return end
+	local p = hrp.Position + hrp.CFrame.LookVector * 8
+	local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Exclude
+	params.FilterDescendantsInstances = {char}
+	local res = workspace:Raycast(p + Vector3.new(0, 10, 0), Vector3.new(0, -80, 0), params)
+	if res then pasteAt(res.Position, res.Normal) else pasteAt(p, Vector3.yAxis) end
+end
+
+local function duplicate()
+	if not valid() then status("Selecciona algo primero") return end
+	local c = cloneObj(sel)
+	if not c then status("No se pudo duplicar") return end
+	local off = dir("right") * math.max(2, moveStep)
+	c:PivotTo(sel:GetPivot() + off)
+	pcall(function() c.Parent = sel.Parent end)
+	if not c.Parent then c.Parent = workspace end
+	select_(c)
+	status("Duplicado: " .. c.Name)
+end
+
+local delArmed = false
+local function deleteSel(btn)
+	if not valid() then status("Selecciona algo primero") return end
+	if not delArmed then
+		delArmed = true
+		btn.Text = "¿Seguro? Toca otra vez"
+		task.delay(2, function()
+			delArmed = false
+			btn.Text = "Borrar objeto (local)"
+		end)
+		return
+	end
+	delArmed = false
+	btn.Text = "Borrar objeto (local)"
+	local o = sel
+	select_(nil)
+	pcall(function() o:Destroy() end)
+	status("Objeto borrado")
+end
+
+setPasting = function(v)
+	pasting = v
+	if v then setSelecting(false) end
+	if pasteTapBtn then
+		pasteTapBtn.Text = v and "Toca el lugar…" or "Pegar tocando"
+		local col = v and C.accent or C.warn
+		pasteTapBtn:SetAttribute("base", col)
+		TweenService:Create(pasteTapBtn, TweenInfo.new(0.15), {BackgroundColor3 = col}):Play()
+	end
+end
+
+do
+	local f = tabFrames["Copiar"]
+	local copyBtn = button(f, "Copiar", UDim2.new(0, 112, 0, 40), UDim2.new(0, 0, 0, 0), C.accent, 13)
+	local dupBtn = button(f, "Duplicar", UDim2.new(0, 112, 0, 40), UDim2.new(0, 118, 0, 0), C.good, 13)
+	local frontBtn = button(f, "Pegar frente a mí", UDim2.new(0, 112, 0, 40), UDim2.new(0, 0, 0, 46), C.btn, 12)
+	pasteTapBtn = button(f, "Pegar tocando", UDim2.new(0, 112, 0, 40), UDim2.new(0, 118, 0, 46), C.warn, 12)
+	local delBtn = button(f, "Borrar objeto (local)", UDim2.new(1, 0, 0, 26), UDim2.new(0, 0, 0, 92), C.danger, 11)
+	statusLbl = label(f, "Selecciona algo y pulsa Copiar", UDim2.new(1, 0, 0, 16), UDim2.new(0, 0, 0, 124), 11, C.dim, Enum.TextXAlignment.Center)
+	for _, b in ipairs({copyBtn, dupBtn, frontBtn, pasteTapBtn}) do b.TextWrapped = true end
+
+	copyBtn.MouseButton1Click:Connect(copySel)
+	dupBtn.MouseButton1Click:Connect(duplicate)
+	frontBtn.MouseButton1Click:Connect(pasteFront)
+	pasteTapBtn.MouseButton1Click:Connect(function()
+		if not clip then status("No hay nada copiado") return end
+		setPasting(not pasting)
+	end)
+	delBtn.MouseButton1Click:Connect(function() deleteSel(delBtn) end)
+end
+
+-- ============================================================
 -- SELECCIÓN POR TOQUE
 -- ============================================================
 UIS.InputBegan:Connect(function(input, processed)
-	if processed or not selecting then return end
+	if processed or not (selecting or pasting) then return end
 	if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
 		local cam = workspace.CurrentCamera
 		local ray = cam:ScreenPointToRay(input.Position.X, input.Position.Y)
@@ -378,8 +516,13 @@ UIS.InputBegan:Connect(function(input, processed)
 		params.FilterDescendantsInstances = {LP.Character}
 		local res = workspace:Raycast(ray.Origin, ray.Direction * 1000, params)
 		if res and res.Instance then
-			select_(res.Instance)
-			setSelecting(false)
+			if pasting then
+				pasteAt(res.Position, res.Normal)
+				setPasting(false)
+			else
+				select_(res.Instance)
+				setSelecting(false)
+			end
 		end
 	end
 end)
