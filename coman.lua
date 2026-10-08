@@ -1,4 +1,4 @@
--- Mod Menu con pestañas + clonar + selección múltiple para Adopt Me (Delta Executor - Celular)
+-- Mod Menu con pestañas + clonar + selección múltiple + deshacer para Adopt Me (Delta Executor - Celular)
 
 local Players = game:GetService("Players")
 local LocalPlayer = Players.LocalPlayer
@@ -7,23 +7,24 @@ local UserInputService = game:GetService("UserInputService")
 -- ============================================================
 -- 1. VARIABLES
 -- ============================================================
-local selectedObjects = {}   -- lista de objetos seleccionados
-local highlights = {}        -- highlights asociados
+local selectedObjects = {}
+local highlights = {}
 local isSelecting = false
 local isMultiSelect = false
 local moveStep = 1
 local currentTab = "Seleccion"
+local history = {} -- pila para deshacer
+local maxHistory = 20
 
 -- ============================================================
 -- 2. INTERFAZ PRINCIPAL
 -- ============================================================
 local screenGui = Instance.new("ScreenGui")
-screenGui.Name = "ModMenuTabsPlus"
+screenGui.Name = "ModMenuUndo"
 screenGui.ResetOnSpawn = false
 screenGui.IgnoreGuiInset = true
 screenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
 
--- Botón flotante
 local toggleBtn = Instance.new("TextButton")
 toggleBtn.Size = UDim2.new(0, 45, 0, 45)
 toggleBtn.Position = UDim2.new(0, 10, 0.5, -22)
@@ -38,10 +39,9 @@ local toggleCorner = Instance.new("UICorner")
 toggleCorner.CornerRadius = UDim.new(0, 22)
 toggleCorner.Parent = toggleBtn
 
--- Panel principal
 local panel = Instance.new("Frame")
-panel.Size = UDim2.new(0, 220, 0, 270)
-panel.Position = UDim2.new(0, 62, 0.5, -135)
+panel.Size = UDim2.new(0, 230, 0, 290)
+panel.Position = UDim2.new(0, 62, 0.5, -145)
 panel.BackgroundColor3 = Color3.fromRGB(22, 22, 32)
 panel.BorderSizePixel = 0
 panel.Parent = screenGui
@@ -51,12 +51,11 @@ local panelCorner = Instance.new("UICorner")
 panelCorner.CornerRadius = UDim.new(0, 10)
 panelCorner.Parent = panel
 
--- Título (arrastrable)
 local title = Instance.new("TextLabel")
 title.Size = UDim2.new(1, 0, 0, 24)
 title.Position = UDim2.new(0, 0, 0, 2)
 title.BackgroundTransparency = 1
-title.Text = "Mod Menu Plus"
+title.Text = "Mod Menu + Undo"
 title.TextColor3 = Color3.fromRGB(200, 220, 255)
 title.Font = Enum.Font.SourceSansBold
 title.TextSize = 12
@@ -82,7 +81,7 @@ tabLayout.Padding = UDim.new(0, 2)
 tabLayout.SortOrder = Enum.SortOrder.LayoutOrder
 tabLayout.Parent = tabBar
 
-local tabNames = {"Seleccion", "Mover", "Rotar", "Escalar", "Clonar"}
+local tabNames = {"Sel", "Mover", "Rotar", "Escalar", "Clonar"}
 local tabButtons = {}
 
 for i, name in ipairs(tabNames) do
@@ -92,7 +91,7 @@ for i, name in ipairs(tabNames) do
     tab.Text = name
     tab.TextColor3 = Color3.fromRGB(180, 200, 220)
     tab.Font = Enum.Font.SourceSansBold
-    tab.TextSize = 8
+    tab.TextSize = 9
     tab.Parent = tabBar
 
     local tc = Instance.new("UICorner")
@@ -114,7 +113,7 @@ for i, name in ipairs(tabNames) do
 end
 
 -- ============================================================
--- 4. INFO DE SELECCIÓN
+-- 4. INFO
 -- ============================================================
 local infoLabel = Instance.new("TextLabel")
 infoLabel.Size = UDim2.new(0.95, 0, 0, 34)
@@ -134,10 +133,10 @@ infoCorner.CornerRadius = UDim.new(0, 6)
 infoCorner.Parent = infoLabel
 
 -- ============================================================
--- 5. CONTENEDOR DE CONTENIDO
+-- 5. CONTENIDO
 -- ============================================================
 local contentFrame = Instance.new("Frame")
-contentFrame.Size = UDim2.new(0.95, 0, 0, 150)
+contentFrame.Size = UDim2.new(0.95, 0, 0, 170)
 contentFrame.Position = UDim2.new(0.025, 0, 0, 96)
 contentFrame.BackgroundColor3 = Color3.fromRGB(15, 15, 25)
 contentFrame.BorderSizePixel = 0
@@ -180,6 +179,8 @@ local function clearSelection()
     end
     highlights = {}
     selectedObjects = {}
+    isSelecting = false
+    isMultiSelect = false
     infoLabel.Text = "Sin selección"
 end
 
@@ -206,14 +207,54 @@ local function updateInfo()
 end
 
 -- ============================================================
--- 7. SELECCIÓN (SIMPLE Y MÚLTIPLE)
+-- 7. HISTORIAL (DESHACER)
+-- ============================================================
+local function pushHistory(obj)
+    -- Guarda una copia del estado actual del objeto
+    local entry = {
+        object = obj,
+        position = obj:IsA("BasePart") and obj.Position or nil,
+        orientation = obj:IsA("BasePart") and obj.Orientation or nil,
+        size = obj:IsA("BasePart") and obj.Size or nil,
+        parent = obj.Parent,
+        name = obj.Name,
+        className = obj.ClassName,
+    }
+    table.insert(history, entry)
+    if #history > maxHistory then
+        table.remove(history, 1)
+    end
+end
+
+local function undoLast()
+    if #history == 0 then
+        infoLabel.Text = "Nada que deshacer"
+        return
+    end
+    local entry = table.remove(history)
+    local obj = entry.object
+    if obj and obj.Parent then
+        if obj:IsA("BasePart") then
+            if entry.position then obj.Position = entry.position end
+            if entry.orientation then obj.Orientation = entry.orientation end
+            if entry.size then obj.Size = entry.size end
+        end
+        obj.Name = entry.name
+        infoLabel.Text = "Deshecho: " .. entry.name
+    else
+        infoLabel.Text = "Objeto ya no existe"
+    end
+    updateInfo()
+end
+
+-- ============================================================
+-- 8. SELECCIÓN
 -- ============================================================
 local function selectObject(obj)
     if not obj then return end
     if not isMultiSelect then
         clearSelection()
     end
-    -- Evitar duplicados
     for _, o in ipairs(selectedObjects) do
         if o == obj then return end
     end
@@ -223,11 +264,12 @@ local function selectObject(obj)
 end
 
 -- ============================================================
--- 8. ACCIONES
+-- 9. ACCIONES CON HISTORIAL
 -- ============================================================
 local function moveAll(direction)
     for _, obj in ipairs(selectedObjects) do
         if obj:IsA("BasePart") then
+            pushHistory(obj)
             local p = obj.Position
             if direction == "up" then p = p + Vector3.new(0, moveStep, 0)
             elseif direction == "down" then p = p - Vector3.new(0, moveStep, 0)
@@ -245,6 +287,7 @@ end
 local function rotateAll(axis)
     for _, obj in ipairs(selectedObjects) do
         if obj:IsA("BasePart") then
+            pushHistory(obj)
             local r = obj.Orientation
             if axis == "x" then r = r + Vector3.new(15,0,0)
             elseif axis == "y" then r = r + Vector3.new(0,15,0)
@@ -259,6 +302,7 @@ end
 local function scaleAll(up)
     for _, obj in ipairs(selectedObjects) do
         if obj:IsA("BasePart") then
+            pushHistory(obj)
             local s = obj.Size
             local d = up and 0.5 or -0.5
             obj.Size = Vector3.new(math.max(0.1, s.X+d), math.max(0.1, s.Y+d), math.max(0.1, s.Z+d))
@@ -267,28 +311,25 @@ local function scaleAll(up)
     updateInfo()
 end
 
-local function cloneAll()
+local function cloneAll(offset)
     if #selectedObjects == 0 then return end
     local clones = {}
     for _, obj in ipairs(selectedObjects) do
+        pushHistory(obj)
         local clone = obj:Clone()
         clone.Parent = obj.Parent
-        -- Desplazar ligeramente para no superponer
         if clone:IsA("BasePart") then
-            clone.Position = clone.Position + Vector3.new(2, 0, 0)
+            clone.Position = clone.Position + (offset or Vector3.new(2, 0, 0))
         end
         table.insert(clones, clone)
     end
-    -- Seleccionar los clones
     clearSelection()
-    for _, c in ipairs(clones) do
-        selectObject(c)
-    end
+    for _, c in ipairs(clones) do selectObject(c) end
     updateInfo()
 end
 
 -- ============================================================
--- 9. ACTUALIZAR CONTENIDO SEGÚN TAB
+-- 10. ACTUALIZAR CONTENIDO
 -- ============================================================
 function updateContent()
     for _, child in ipairs(contentFrame:GetChildren()) do
@@ -310,7 +351,7 @@ function updateContent()
         btn.MouseButton1Click:Connect(callback)
     end
 
-    if currentTab == "Seleccion" then
+    if currentTab == "Sel" then
         addBtn("🔍 SELECCIONAR UNO", Color3.fromRGB(0, 150, 100), function()
             isSelecting = true
             isMultiSelect = false
@@ -321,12 +362,21 @@ function updateContent()
             isMultiSelect = true
             infoLabel.Text = "Toca varios objetos..."
         end)
-        addBtn("🗑 LIMPIAR SELECCIÓN", Color3.fromRGB(100, 60, 180), function()
-            clearSelection()
+        addBtn("⏹ DEJAR DE SELECCIONAR", Color3.fromRGB(80, 80, 80), function()
+            isSelecting = false
+            isMultiSelect = false
+            infoLabel.Text = "Selección detenida"
         end)
-        addBtn("❌ ELIMINAR SELECCIONADOS", Color3.fromRGB(180, 0, 0), function()
+        addBtn("↩ DESHACER SELECCIÓN", Color3.fromRGB(100, 60, 180), function()
+            clearSelection()
+            infoLabel.Text = "Selección deshecha"
+        end)
+        addBtn("🗑 ELIMINAR SELECCIONADOS", Color3.fromRGB(180, 0, 0), function()
             for _, obj in ipairs(selectedObjects) do
-                if obj and obj.Parent then obj:Destroy() end
+                if obj and obj.Parent then
+                    pushHistory(obj)
+                    obj:Destroy()
+                end
             end
             clearSelection()
         end)
@@ -353,7 +403,7 @@ function updateContent()
         addBtn("🔄 ROTAR Z (+15°)", Color3.fromRGB(180, 120, 0), function() rotateAll("z") end)
         addBtn("🔃 RESET ROTACIÓN", Color3.fromRGB(100, 60, 180), function()
             for _, obj in ipairs(selectedObjects) do
-                if obj:IsA("BasePart") then obj.Orientation = Vector3.new(0,0,0) end
+                if obj:IsA("BasePart") then pushHistory(obj) obj.Orientation = Vector3.new(0,0,0) end
             end
             updateInfo()
         end)
@@ -362,33 +412,18 @@ function updateContent()
         addBtn("➖ REDUCIR (-0.5)", Color3.fromRGB(0, 150, 100), function() scaleAll(false) end)
         addBtn("🔃 RESET TAMAÑO", Color3.fromRGB(100, 60, 180), function()
             for _, obj in ipairs(selectedObjects) do
-                if obj:IsA("BasePart") then obj.Size = Vector3.new(1,1,1) end
+                if obj:IsA("BasePart") then pushHistory(obj) obj.Size = Vector3.new(1,1,1) end
             end
             updateInfo()
         end)
     elseif currentTab == "Clonar" then
-        addBtn("📄 CLONAR SELECCIONADOS", Color3.fromRGB(0, 120, 200), function()
-            cloneAll()
-        end)
-        addBtn("📄 CLONAR Y SEPARAR (+5)", Color3.fromRGB(0, 150, 100), function()
-            if #selectedObjects == 0 then return end
-            local clones = {}
-            for _, obj in ipairs(selectedObjects) do
-                local clone = obj:Clone()
-                clone.Parent = obj.Parent
-                if clone:IsA("BasePart") then
-                    clone.Position = clone.Position + Vector3.new(5, 0, 0)
-                end
-                table.insert(clones, clone)
-            end
-            clearSelection()
-            for _, c in ipairs(clones) do selectObject(c) end
-            updateInfo()
-        end)
+        addBtn("📄 CLONAR (+2 studs)", Color3.fromRGB(0, 120, 200), function() cloneAll(Vector3.new(2, 0, 0)) end)
+        addBtn("📄 CLONAR (+5 studs)", Color3.fromRGB(0, 150, 100), function() cloneAll(Vector3.new(5, 0, 0)) end)
+        addBtn("📄 CLONAR ENCIMA", Color3.fromRGB(0, 100, 150), function() cloneAll(Vector3.new(0, 1, 0)) end)
         addBtn("🗑 ELIMINAR CLONES", Color3.fromRGB(180, 0, 0), function()
-            -- Elimina los objetos seleccionados que sean clones (heurística: nombre con "Clone" o recién creados)
             for _, obj in ipairs(selectedObjects) do
                 if obj and obj.Parent and obj.Name:find("Clone") then
+                    pushHistory(obj)
                     obj:Destroy()
                 end
             end
@@ -400,7 +435,27 @@ end
 updateContent()
 
 -- ============================================================
--- 10. SELECCIÓN POR TOQUE
+-- 11. BOTÓN GLOBAL DE DESHACER (siempre visible)
+-- ============================================================
+local undoBtn = Instance.new("TextButton")
+undoBtn.Size = UDim2.new(0.95, 0, 0, 24)
+undoBtn.Position = UDim2.new(0.025, 0, 0, 268)
+undoBtn.BackgroundColor3 = Color3.fromRGB(120, 60, 180)
+undoBtn.Text = "↩ DESHACER ÚLTIMA ACCIÓN"
+undoBtn.TextColor3 = Color3.fromRGB(255,255,255)
+undoBtn.Font = Enum.Font.SourceSansBold
+undoBtn.TextSize = 9
+undoBtn.Parent = panel
+local undoCorner = Instance.new("UICorner")
+undoCorner.CornerRadius = UDim.new(0, 4)
+undoCorner.Parent = undoBtn
+
+undoBtn.MouseButton1Click:Connect(function()
+    undoLast()
+end)
+
+-- ============================================================
+-- 12. SELECCIÓN POR TOQUE
 -- ============================================================
 UserInputService.InputBegan:Connect(function(input, gp)
     if gp then return end
@@ -417,7 +472,7 @@ UserInputService.InputBegan:Connect(function(input, gp)
 end)
 
 -- ============================================================
--- 11. ARRASTRAR PANEL
+-- 13. ARRASTRAR PANEL
 -- ============================================================
 local dragging, dragStart, startPos = false, nil, nil
 title.InputBegan:Connect(function(input)
@@ -440,12 +495,12 @@ UserInputService.InputEnded:Connect(function(input)
 end)
 
 -- ============================================================
--- 12. TOGGLE
+-- 14. TOGGLE
 -- ============================================================
 toggleBtn.MouseButton1Click:Connect(function()
     panel.Visible = not panel.Visible
 end)
 
-print("[ModMenuPlus] Cargado. Usa ☰ para abrir/cerrar.")
-print("[ModMenuPlus] Selección múltiple activada en pestaña Selección.")
-print("[ModMenuPlus] Pestaña Clonar añadida.")
+print("[ModMenuUndo] Cargado. Usa ☰ para abrir/cerrar.")
+print("[ModMenuUndo] Pestaña Sel: seleccionar uno, varios, dejar de seleccionar, deshacer selección.")
+print("[ModMenuUndo] Botón global: DESHACER ÚLTIMA ACCIÓN.")
