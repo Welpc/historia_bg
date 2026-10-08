@@ -1,9 +1,9 @@
--- Panel de exploración y modificación para Adopt Me (Delta Executor - Celular)
--- Permite seleccionar objetos, ver nombres, rutas, coordenadas y modificar Parts
+-- Panel de edición tipo Studio para Adopt Me (Delta Executor - Celular)
+-- Mueve Parts con botones de flechas (arriba, abajo, izquierda, derecha, adelante, atrás)
+-- Incluye rotación y escalado
 
 local Players = game:GetService("Players")
 local LocalPlayer = Players.LocalPlayer
-local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
 
 -- ============================================================
@@ -11,25 +11,23 @@ local UserInputService = game:GetService("UserInputService")
 -- ============================================================
 local selectedObject = nil
 local highlight = nil
-local isPanelOpen = true
 local isSelecting = false
-local dragPart = nil
-local dragStart = nil
+local moveStep = 1 -- Studs por clic (se puede cambiar)
 
 -- ============================================================
--- 2. INTERFAZ PRINCIPAL (PANEL)
+-- 2. INTERFAZ PRINCIPAL
 -- ============================================================
 local screenGui = Instance.new("ScreenGui")
-screenGui.Name = "AdoptMeExplorer"
+screenGui.Name = "StudioEditor"
 screenGui.ResetOnSpawn = false
 screenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
 
--- Botón flotante para abrir/cerrar
+-- Botón flotante
 local toggleBtn = Instance.new("TextButton")
 toggleBtn.Size = UDim2.new(0, 50, 0, 50)
 toggleBtn.Position = UDim2.new(0, 10, 0.5, -25)
 toggleBtn.BackgroundColor3 = Color3.fromRGB(0, 120, 215)
-toggleBtn.Text = "🔍"
+toggleBtn.Text = "🛠"
 toggleBtn.TextSize = 24
 toggleBtn.TextColor3 = Color3.fromRGB(255,255,255)
 toggleBtn.Font = Enum.Font.SourceSansBold
@@ -41,8 +39,8 @@ toggleCorner.Parent = toggleBtn
 
 -- Panel principal
 local panel = Instance.new("Frame")
-panel.Size = UDim2.new(0, 280, 0, 400)
-panel.Position = UDim2.new(0, 70, 0.5, -200)
+panel.Size = UDim2.new(0, 320, 0, 520)
+panel.Position = UDim2.new(0, 70, 0.5, -260)
 panel.BackgroundColor3 = Color3.fromRGB(25, 25, 35)
 panel.BorderSizePixel = 0
 panel.Parent = screenGui
@@ -51,40 +49,23 @@ local panelCorner = Instance.new("UICorner")
 panelCorner.CornerRadius = UDim.new(0, 12)
 panelCorner.Parent = panel
 
--- Título
+-- Título (arrastrable)
 local title = Instance.new("TextLabel")
 title.Size = UDim2.new(1, 0, 0, 30)
 title.Position = UDim2.new(0, 0, 0, 5)
 title.BackgroundTransparency = 1
-title.Text = "Explorador Adopt Me"
+title.Text = "Editor de Objetos - Adopt Me"
 title.TextColor3 = Color3.fromRGB(200, 220, 255)
 title.Font = Enum.Font.SourceSansBold
-title.TextSize = 16
+title.TextSize = 15
 title.Parent = panel
 
 -- ============================================================
--- 3. BOTONES DE ACCIÓN
+-- 3. INFORMACIÓN DEL OBJETO SELECCIONADO
 -- ============================================================
-local function createButton(text, yPos, color)
-    local btn = Instance.new("TextButton")
-    btn.Size = UDim2.new(0.9, 0, 0, 32)
-    btn.Position = UDim2.new(0.05, 0, 0, yPos)
-    btn.BackgroundColor3 = color or Color3.fromRGB(60, 60, 80)
-    btn.Text = text
-    btn.TextColor3 = Color3.fromRGB(255,255,255)
-    btn.Font = Enum.Font.SourceSansBold
-    btn.TextSize = 12
-    btn.Parent = panel
-    local c = Instance.new("UICorner")
-    c.CornerRadius = UDim.new(0, 6)
-    c.Parent = btn
-    return btn
-end
-
-local selectBtn = createButton("SELECCIONAR OBJETO", 40, Color3.fromRGB(0, 150, 100))
 local infoFrame = Instance.new("Frame")
-infoFrame.Size = UDim2.new(0.9, 0, 0, 120)
-infoFrame.Position = UDim2.new(0.05, 0, 0, 78)
+infoFrame.Size = UDim2.new(0.95, 0, 0, 100)
+infoFrame.Position = UDim2.new(0.025, 0, 0, 40)
 infoFrame.BackgroundColor3 = Color3.fromRGB(15, 15, 25)
 infoFrame.BorderSizePixel = 0
 infoFrame.Parent = panel
@@ -106,25 +87,9 @@ infoText.TextXAlignment = Enum.TextXAlignment.Left
 infoText.TextYAlignment = Enum.TextYAlignment.Top
 infoText.Parent = infoFrame
 
-local moveBtn = createButton("MOVER PART (arrastrar)", 205, Color3.fromRGB(180, 120, 0))
-local deleteBtn = createButton("ELIMINAR OBJETO", 242, Color3.fromRGB(180, 0, 0))
-local copyBtn = createButton("COPIAR RUTA", 279, Color3.fromRGB(100, 60, 180))
-
 -- ============================================================
--- 4. SELECCIÓN POR TOQUE/CLIC EN PANTALLA
+-- 4. FUNCIONES AUXILIARES
 -- ============================================================
-local function getObjectAtPosition(x, y)
-    local ray = Ray.new(
-        workspace.CurrentCamera:ScreenPointToRay(x, y).Origin,
-        workspace.CurrentCamera:ScreenPointToRay(x, y).Direction * 500
-    )
-    local hit, position = workspace:FindPartOnRay(ray, LocalPlayer.Character)
-    if hit then
-        return hit
-    end
-    return nil
-end
-
 local function getFullPath(obj)
     local path = obj.Name
     local parent = obj.Parent
@@ -135,47 +100,249 @@ local function getFullPath(obj)
     return "game." .. path
 end
 
-local function selectObject(obj)
-    if not obj then return end
-    
-    -- Eliminar highlight anterior
-    if highlight then
-        highlight:Destroy()
-        highlight = nil
+local function getObjectAtPosition(x, y)
+    local ray = workspace.CurrentCamera:ScreenPointToRay(x, y)
+    local raycastParams = RaycastParams.new()
+    raycastParams.FilterDescendantsInstances = {LocalPlayer.Character}
+    raycastParams.FilterType = Enum.RaycastFilterType.Exclude
+    local result = workspace:Raycast(ray.Origin, ray.Direction * 500, raycastParams)
+    if result then return result.Instance end
+    return nil
+end
+
+local function updateInfo()
+    if not selectedObject then
+        infoText.Text = "Ningún objeto seleccionado"
+        return
     end
-    
-    selectedObject = obj
-    
-    -- Crear highlight visual
-    highlight = Instance.new("Highlight")
-    highlight.FillColor = Color3.fromRGB(0, 255, 100)
-    highlight.OutlineColor = Color3.fromRGB(255, 255, 255)
-    highlight.FillTransparency = 0.5
-    highlight.Parent = obj
-    
-    -- Actualizar información
-    local pos = obj:IsA("BasePart") and obj.Position or (obj:FindFirstChild("HumanoidRootPart") and obj.HumanoidRootPart.Position) or Vector3.new(0,0,0)
+    local obj = selectedObject
+    local pos = obj:IsA("BasePart") and obj.Position or Vector3.new(0,0,0)
+    local rot = obj:IsA("BasePart") and obj.Orientation or Vector3.new(0,0,0)
     local size = obj:IsA("BasePart") and obj.Size or Vector3.new(0,0,0)
     
     infoText.Text = string.format(
-        "Nombre: %s\nClase: %s\nRuta: %s\nPosición: (%.1f, %.1f, %.1f)\nTamaño: (%.1f, %.1f, %.1f)\nPadre: %s",
-        obj.Name,
-        obj.ClassName,
-        getFullPath(obj),
+        "Nombre: %s\nClase: %s\nRuta: %s\nPos: (%.1f, %.1f, %.1f)\nRot: (%.1f, %.1f, %.1f)\nSize: (%.1f, %.1f, %.1f)\nPadre: %s",
+        obj.Name, obj.ClassName, getFullPath(obj),
         pos.X, pos.Y, pos.Z,
+        rot.X, rot.Y, rot.Z,
         size.X, size.Y, size.Z,
         obj.Parent and obj.Parent.Name or "nil"
     )
 end
 
--- Detectar toque en pantalla para seleccionar
+local function selectObject(obj)
+    if not obj then return end
+    if highlight then highlight:Destroy() highlight = nil end
+    selectedObject = obj
+    highlight = Instance.new("Highlight")
+    highlight.FillColor = Color3.fromRGB(0, 255, 100)
+    highlight.OutlineColor = Color3.fromRGB(255, 255, 255)
+    highlight.FillTransparency = 0.5
+    highlight.Parent = obj
+    updateInfo()
+end
+
+-- ============================================================
+-- 5. BOTONES DE ACCIÓN
+-- ============================================================
+local function createButton(text, x, y, w, h, color, parent)
+    local btn = Instance.new("TextButton")
+    btn.Size = UDim2.new(0, w, 0, h)
+    btn.Position = UDim2.new(0, x, 0, y)
+    btn.BackgroundColor3 = color or Color3.fromRGB(60, 60, 80)
+    btn.Text = text
+    btn.TextColor3 = Color3.fromRGB(255,255,255)
+    btn.Font = Enum.Font.SourceSansBold
+    btn.TextSize = 11
+    btn.Parent = parent or panel
+    local c = Instance.new("UICorner")
+    c.CornerRadius = UDim.new(0, 5)
+    c.Parent = btn
+    return btn
+end
+
+-- Botón seleccionar
+local selectBtn = createButton("SELECCIONAR OBJETO", 15, 148, 290, 30, Color3.fromRGB(0, 150, 100))
+
+-- ============================================================
+-- 6. CONTROLES DE MOVIMIENTO (FLECHAS)
+-- ============================================================
+local moveFrame = Instance.new("Frame")
+moveFrame.Size = UDim2.new(0.95, 0, 0, 130)
+moveFrame.Position = UDim2.new(0.025, 0, 0, 185)
+moveFrame.BackgroundColor3 = Color3.fromRGB(15, 15, 25)
+moveFrame.BorderSizePixel = 0
+moveFrame.Parent = panel
+
+local moveCorner = Instance.new("UICorner")
+moveCorner.CornerRadius = UDim.new(0, 8)
+moveCorner.Parent = moveFrame
+
+local moveLabel = Instance.new("TextLabel")
+moveLabel.Size = UDim2.new(1, 0, 0, 20)
+moveLabel.Position = UDim2.new(0, 0, 0, 2)
+moveLabel.BackgroundTransparency = 1
+moveLabel.Text = "MOVER (Studs: " .. moveStep .. ")"
+moveLabel.TextColor3 = Color3.fromRGB(200, 220, 255)
+moveLabel.Font = Enum.Font.SourceSansBold
+moveLabel.TextSize = 12
+moveLabel.Parent = moveFrame
+
+-- Flechas de movimiento
+local btnUp = createButton("↑ Arriba", 10, 25, 90, 30, Color3.fromRGB(0, 100, 200), moveFrame)
+local btnDown = createButton("↓ Abajo", 110, 25, 90, 30, Color3.fromRGB(0, 100, 200), moveFrame)
+local btnLeft = createButton("← Izquierda", 10, 60, 90, 30, Color3.fromRGB(0, 100, 200), moveFrame)
+local btnRight = createButton("→ Derecha", 110, 60, 90, 30, Color3.fromRGB(0, 100, 200), moveFrame)
+local btnForward = createButton("↗ Adelante", 10, 95, 90, 30, Color3.fromRGB(0, 150, 100), moveFrame)
+local btnBack = createButton("↙ Atrás", 110, 95, 90, 30, Color3.fromRGB(0, 150, 100), moveFrame)
+
+-- ============================================================
+-- 7. CONTROLES DE ROTACIÓN
+-- ============================================================
+local rotFrame = Instance.new("Frame")
+rotFrame.Size = UDim2.new(0.95, 0, 0, 100)
+rotFrame.Position = UDim2.new(0.025, 0, 0, 320)
+rotFrame.BackgroundColor3 = Color3.fromRGB(15, 15, 25)
+rotFrame.BorderSizePixel = 0
+rotFrame.Parent = panel
+
+local rotCorner = Instance.new("UICorner")
+rotCorner.CornerRadius = UDim.new(0, 8)
+rotCorner.Parent = rotFrame
+
+local rotLabel = Instance.new("TextLabel")
+rotLabel.Size = UDim2.new(1, 0, 0, 20)
+rotLabel.Position = UDim2.new(0, 0, 0, 2)
+rotLabel.BackgroundTransparency = 1
+rotLabel.Text = "ROTAR (15 grados por clic)"
+rotLabel.TextColor3 = Color3.fromRGB(200, 220, 255)
+rotLabel.Font = Enum.Font.SourceSansBold
+rotLabel.TextSize = 12
+rotLabel.Parent = rotFrame
+
+local btnRotX = createButton("Rotar X", 10, 25, 90, 30, Color3.fromRGB(180, 120, 0), rotFrame)
+local btnRotY = createButton("Rotar Y", 110, 25, 90, 30, Color3.fromRGB(180, 120, 0), rotFrame)
+local btnRotZ = createButton("Rotar Z", 10, 60, 90, 30, Color3.fromRGB(180, 120, 0), rotFrame)
+local btnResetRot = createButton("Reset Rot", 110, 60, 90, 30, Color3.fromRGB(100, 60, 180), rotFrame)
+
+-- ============================================================
+-- 8. CONTROLES DE ESCALA
+-- ============================================================
+local sizeFrame = Instance.new("Frame")
+sizeFrame.Size = UDim2.new(0.95, 0, 0, 100)
+sizeFrame.Position = UDim2.new(0.025, 0, 0, 425)
+sizeFrame.BackgroundColor3 = Color3.fromRGB(15, 15, 25)
+sizeFrame.BorderSizePixel = 0
+sizeFrame.Parent = panel
+
+local sizeCorner = Instance.new("UICorner")
+sizeCorner.CornerRadius = UDim.new(0, 8)
+sizeCorner.Parent = sizeFrame
+
+local sizeLabel = Instance.new("TextLabel")
+sizeLabel.Size = UDim2.new(1, 0, 0, 20)
+sizeLabel.Position = UDim2.new(0, 0, 0, 2)
+sizeLabel.BackgroundTransparency = 1
+sizeLabel.Text = "ESCALAR (0.5 studs por clic)"
+sizeLabel.TextColor3 = Color3.fromRGB(200, 220, 255)
+sizeLabel.Font = Enum.Font.SourceSansBold
+sizeLabel.TextSize = 12
+sizeLabel.Parent = sizeFrame
+
+local btnSizeUp = createButton("+ Grande", 10, 25, 90, 30, Color3.fromRGB(0, 150, 100), sizeFrame)
+local btnSizeDown = createButton("- Pequeño", 110, 25, 90, 30, Color3.fromRGB(0, 150, 100), sizeFrame)
+local btnResetSize = createButton("Reset Size", 10, 60, 90, 30, Color3.fromRGB(100, 60, 180), sizeFrame)
+local btnResetAll = createButton("Reset Todo", 110, 60, 90, 30, Color3.fromRGB(180, 0, 0), sizeFrame)
+
+-- ============================================================
+-- 9. FUNCIONES DE MOVIMIENTO
+-- ============================================================
+local function moveSelected(direction)
+    if not selectedObject or not selectedObject:IsA("BasePart") then
+        infoText.Text = "Selecciona un BasePart para mover"
+        return
+    end
+    local pos = selectedObject.Position
+    if direction == "up" then pos = pos + Vector3.new(0, moveStep, 0)
+    elseif direction == "down" then pos = pos - Vector3.new(0, moveStep, 0)
+    elseif direction == "left" then pos = pos - Vector3.new(moveStep, 0, 0)
+    elseif direction == "right" then pos = pos + Vector3.new(moveStep, 0, 0)
+    elseif direction == "forward" then pos = pos + Vector3.new(0, 0, -moveStep)
+    elseif direction == "back" then pos = pos + Vector3.new(0, 0, moveStep)
+    end
+    selectedObject.Position = pos
+    updateInfo()
+end
+
+local function rotateSelected(axis)
+    if not selectedObject or not selectedObject:IsA("BasePart") then return end
+    local rot = selectedObject.Orientation
+    if axis == "x" then rot = rot + Vector3.new(15, 0, 0)
+    elseif axis == "y" then rot = rot + Vector3.new(0, 15, 0)
+    elseif axis == "z" then rot = rot + Vector3.new(0, 0, 15)
+    end
+    selectedObject.Orientation = rot
+    updateInfo()
+end
+
+local function scaleSelected(up)
+    if not selectedObject or not selectedObject:IsA("BasePart") then return end
+    local size = selectedObject.Size
+    local delta = up and 0.5 or -0.5
+    local newSize = Vector3.new(
+        math.max(0.1, size.X + delta),
+        math.max(0.1, size.Y + delta),
+        math.max(0.1, size.Z + delta)
+    )
+    selectedObject.Size = newSize
+    updateInfo()
+end
+
+-- ============================================================
+-- 10. CONEXIONES DE BOTONES
+-- ============================================================
+btnUp.MouseButton1Click:Connect(function() moveSelected("up") end)
+btnDown.MouseButton1Click:Connect(function() moveSelected("down") end)
+btnLeft.MouseButton1Click:Connect(function() moveSelected("left") end)
+btnRight.MouseButton1Click:Connect(function() moveSelected("right") end)
+btnForward.MouseButton1Click:Connect(function() moveSelected("forward") end)
+btnBack.MouseButton1Click:Connect(function() moveSelected("back") end)
+
+btnRotX.MouseButton1Click:Connect(function() rotateSelected("x") end)
+btnRotY.MouseButton1Click:Connect(function() rotateSelected("y") end)
+btnRotZ.MouseButton1Click:Connect(function() rotateSelected("z") end)
+btnResetRot.MouseButton1Click:Connect(function()
+    if selectedObject and selectedObject:IsA("BasePart") then
+        selectedObject.Orientation = Vector3.new(0,0,0)
+        updateInfo()
+    end
+end)
+
+btnSizeUp.MouseButton1Click:Connect(function() scaleSelected(true) end)
+btnSizeDown.MouseButton1Click:Connect(function() scaleSelected(false) end)
+btnResetSize.MouseButton1Click:Connect(function()
+    if selectedObject and selectedObject:IsA("BasePart") then
+        selectedObject.Size = Vector3.new(1,1,1)
+        updateInfo()
+    end
+end)
+btnResetAll.MouseButton1Click:Connect(function()
+    if selectedObject and selectedObject:IsA("BasePart") then
+        selectedObject.Size = Vector3.new(1,1,1)
+        selectedObject.Orientation = Vector3.new(0,0,0)
+        selectedObject.Position = Vector3.new(0, 5, 0)
+        updateInfo()
+    end
+end)
+
+-- ============================================================
+-- 11. SELECCIÓN POR TOQUE
+-- ============================================================
 UserInputService.InputBegan:Connect(function(input, gameProcessed)
     if gameProcessed then return end
     if not isSelecting then return end
-    
     if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
-        local pos = input.Position
-        local obj = getObjectAtPosition(pos.X, pos.Y)
+        local obj = getObjectAtPosition(input.Position.X, input.Position.Y)
         if obj then
             selectObject(obj)
             isSelecting = false
@@ -197,78 +364,7 @@ selectBtn.MouseButton1Click:Connect(function()
 end)
 
 -- ============================================================
--- 5. MOVER PART ARRASTRANDO
--- ============================================================
-local function startDrag()
-    if not selectedObject or not selectedObject:IsA("BasePart") then
-        infoText.Text = "Selecciona un BasePart para mover"
-        return
-    end
-    dragPart = selectedObject
-    infoText.Text = "Arrastra el objeto con el dedo/mouse"
-end
-
-local function updateDrag(input)
-    if not dragPart then return end
-    if input.UserInputType ~= Enum.UserInputType.Touch and input.UserInputType ~= Enum.UserInputType.MouseMovement then return end
-    
-    local ray = workspace.CurrentCamera:ScreenPointToRay(input.Position.X, input.Position.Y)
-    local targetPos = ray.Origin + ray.Direction * 50
-    dragPart.CFrame = CFrame.new(targetPos)
-end
-
-local function stopDrag()
-    dragPart = nil
-end
-
-moveBtn.MouseButton1Click:Connect(startDrag)
-UserInputService.InputChanged:Connect(updateDrag)
-UserInputService.InputEnded:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
-        stopDrag()
-    end
-end)
-
--- ============================================================
--- 6. ELIMINAR OBJETO
--- ============================================================
-deleteBtn.MouseButton1Click:Connect(function()
-    if selectedObject then
-        local name = selectedObject.Name
-        selectedObject:Destroy()
-        if highlight then highlight:Destroy() highlight = nil end
-        selectedObject = nil
-        infoText.Text = "Objeto eliminado: " .. name
-    else
-        infoText.Text = "Ningún objeto seleccionado"
-    end
-end)
-
--- ============================================================
--- 7. COPIAR RUTA AL PORTAPAPELES
--- ============================================================
-copyBtn.MouseButton1Click:Connect(function()
-    if selectedObject then
-        local path = getFullPath(selectedObject)
-        if setclipboard then
-            setclipboard(path)
-            infoText.Text = "Ruta copiada:\n" .. path
-        else
-            infoText.Text = "setclipboard no disponible"
-        end
-    end
-end)
-
--- ============================================================
--- 8. CONTROL DE APERTURA DEL PANEL
--- ============================================================
-toggleBtn.MouseButton1Click:Connect(function()
-    isPanelOpen = not isPanelOpen
-    panel.Visible = isPanelOpen
-end)
-
--- ============================================================
--- 9. HACER EL PANEL ARRASTRABLE
+-- 12. PANEL ARRASTRABLE
 -- ============================================================
 local dragging = false
 local dragStartPos = nil
@@ -295,5 +391,13 @@ UserInputService.InputEnded:Connect(function(input)
     end
 end)
 
-print("[AdoptMeExplorer] Panel cargado. Usa el botón 🔍 para abrir/cerrar.")
-print("[AdoptMeExplorer] Toca 'SELECCIONAR OBJETO' y luego toca cualquier parte del juego.")
+-- ============================================================
+-- 13. TOGGLE DEL PANEL
+-- ============================================================
+toggleBtn.MouseButton1Click:Connect(function()
+    panel.Visible = not panel.Visible
+end)
+
+print("[StudioEditor] Panel cargado. Usa 🛠 para abrir/cerrar.")
+print("[StudioEditor] Selecciona un objeto y usa las flechas para moverlo.")
+print("[StudioEditor] Los cambios son solo locales en tu cliente.")
