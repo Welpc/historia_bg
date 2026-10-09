@@ -1,217 +1,128 @@
--- Cambiar el cielo en Brookhaven para todos los jugadores (intento)
--- ADVERTENCIA: En Brookhaven, el servidor controla el ciclo día/noche y el clima.
--- Este script modifica SOLO tu cliente. Para que otros lo vean, necesitarías
--- modificar el Lighting en el servidor, lo cual no es posible desde el cliente.
--- Sin embargo, intentaré usar métodos que a veces se replican a otros clientes.
-
+-- SkyChanger para Brookhaven (solo tu cliente, funciona al 100% para ti)
 local Players = game:GetService("Players")
 local Lighting = game:GetService("Lighting")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
 local LP = Players.LocalPlayer
 
--- ============================================================
--- MÉTODO 1: Modificar Lighting directamente (solo visible para ti)
--- ============================================================
-local function setSkyForMe()
-    -- Eliminar cielo anterior si existe
-    local oldSky = Lighting:FindFirstChildOfClass("Sky")
-    if oldSky then oldSky:Destroy() end
-    
-    -- Crear nuevo cielo
-    local sky = Instance.new("Sky")
+-- Guardar estado original para restaurar
+local original = {
+    Ambient = Lighting.Ambient,
+    OutdoorAmbient = Lighting.OutdoorAmbient,
+    Brightness = Lighting.Brightness,
+    ClockTime = Lighting.ClockTime,
+    FogColor = Lighting.FogColor,
+    FogStart = Lighting.FogStart,
+    FogEnd = Lighting.FogEnd,
+}
+local originalSkies = {}
+for _, v in ipairs(Lighting:GetChildren()) do
+    if v:IsA("Sky") then table.insert(originalSkies, v:Clone()) end
+end
+
+-- Presets (puedes cambiar los IDs por otros skyboxes válidos)
+local presets = {
+    Dia = {clock = 14, ambient = Color3.fromRGB(128,128,128), bright = 2,
+        sky = {159454299,159454296,159454293,159454286,159454300,159454288}},
+    Atardecer = {clock = 18, ambient = Color3.fromRGB(150,100,90), bright = 1.5,
+        sky = {159454299,159454296,159454293,159454286,159454300,159454288}},
+    Noche = {clock = 0, ambient = Color3.fromRGB(40,40,70), bright = 1,
+        sky = {159454299,159454296,159454293,159454286,159454300,159454288}},
+}
+
+local active = nil -- preset activo
+
+local function applyPreset(p)
+    for _, v in ipairs(Lighting:GetChildren()) do
+        if v:IsA("Sky") and v.Name ~= "CustomSky" then v:Destroy() end
+    end
+    local sky = Lighting:FindFirstChild("CustomSky") or Instance.new("Sky")
     sky.Name = "CustomSky"
-    sky.SkyboxBk = "rbxassetid://159454299"
-    sky.SkyboxDn = "rbxassetid://159454296"
-    sky.SkyboxFt = "rbxassetid://159454293"
-    sky.SkyboxLf = "rbxassetid://159454286"
-    sky.SkyboxRt = "rbxassetid://159454300"
-    sky.SkyboxUp = "rbxassetid://159454288"
-    sky.SunAngularSize = 21
-    sky.MoonAngularSize = 21
+    local f = p.sky
+    sky.SkyboxBk = "rbxassetid://"..f[1]
+    sky.SkyboxDn = "rbxassetid://"..f[2]
+    sky.SkyboxFt = "rbxassetid://"..f[3]
+    sky.SkyboxLf = "rbxassetid://"..f[4]
+    sky.SkyboxRt = "rbxassetid://"..f[5]
+    sky.SkyboxUp = "rbxassetid://"..f[6]
     sky.StarCount = 3000
     sky.Parent = Lighting
-    
-    -- Cambiar colores de iluminación
-    Lighting.Ambient = Color3.fromRGB(70, 70, 90)
-    Lighting.OutdoorAmbient = Color3.fromRGB(128, 128, 128)
-    Lighting.Brightness = 2
-    Lighting.ClockTime = 14 -- 2 PM
-    Lighting.GeographicLatitude = 0
-    Lighting.FogColor = Color3.fromRGB(200, 200, 255)
-    Lighting.FogStart = 100
-    Lighting.FogEnd = 1000
-    
-    return true
+    Lighting.ClockTime = p.clock
+    Lighting.Ambient = p.ambient
+    Lighting.OutdoorAmbient = p.ambient
+    Lighting.Brightness = p.bright
 end
 
--- ============================================================
--- MÉTODO 2: Buscar RemoteEvents del servidor de Brookhaven
--- ============================================================
--- Brookhaven tiene RemoteEvents en ReplicatedStorage para clima y cielo
--- Algunos pueden no tener validación server-side estricta
-
-local function findSkyRemotes()
-    local remotes = {}
-    
-    -- Buscar en ReplicatedStorage
-    for _, obj in ipairs(ReplicatedStorage:GetDescendants()) do
-        if obj:IsA("RemoteEvent") or obj:IsA("RemoteFunction") then
-            local name = obj.Name:lower()
-            if name:find("sky") or name:find("weather") or name:find("time") or name:find("lighting") or name:find("day") then
-                table.insert(remotes, obj)
-            end
+-- Mantener el cielo aunque el servidor lo cambie
+local conn = RunService.RenderStepped:Connect(function()
+    if active then
+        if not Lighting:FindFirstChild("CustomSky") or Lighting.ClockTime ~= active.clock then
+            applyPreset(active)
+        end
+        for _, v in ipairs(Lighting:GetChildren()) do
+            if v:IsA("Sky") and v.Name ~= "CustomSky" then v:Destroy() end
         end
     end
-    
-    -- Buscar en Lighting
-    for _, obj in ipairs(Lighting:GetDescendants()) do
-        if obj:IsA("RemoteEvent") then
-            table.insert(remotes, obj)
-        end
-    end
-    
-    return remotes
+end)
+
+local function restore()
+    active = nil
+    local s = Lighting:FindFirstChild("CustomSky")
+    if s then s:Destroy() end
+    for _, sk in ipairs(originalSkies) do sk:Clone().Parent = Lighting end
+    for k, v in pairs(original) do Lighting[k] = v end
 end
 
--- ============================================================
--- MÉTODO 3: Intentar disparar RemoteEvents (si existen)
--- ============================================================
-local function tryFireRemotes()
-    local remotes = findSkyRemotes()
-    local fired = 0
-    
-    for _, remote in ipairs(remotes) do
-        local success = pcall(function()
-            -- Intentar disparar con diferentes argumentos
-            remote:FireServer("CustomSky")
-            remote:FireServer("Sky", "CustomSky")
-            remote:FireServer("SetSky", "CustomSky")
-            remote:FireServer("Weather", "Clear")
-            remote:FireServer("Time", 14)
-            fired = fired + 1
-        end)
-    end
-    
-    return fired
-end
+-- Interfaz
+local old = LP.PlayerGui:FindFirstChild("SkyChanger")
+if old then old:Destroy() end
 
--- ============================================================
--- MÉTODO 4: Modificar el Sky existente (a veces se replica)
--- ============================================================
-local function modifyExistingSky()
-    local sky = Lighting:FindFirstChildOfClass("Sky")
-    if sky then
-        -- Modificar propiedades que a veces se replican
-        pcall(function()
-            sky.SkyboxBk = "rbxassetid://159454299"
-            sky.SkyboxDn = "rbxassetid://159454296"
-            sky.SkyboxFt = "rbxassetid://159454293"
-            sky.SkyboxLf = "rbxassetid://159454286"
-            sky.SkyboxRt = "rbxassetid://159454300"
-            sky.SkyboxUp = "rbxassetid://159454288"
-            sky.StarCount = 5000
-        end)
-        return true
-    end
-    return false
-end
-
--- ============================================================
--- INTERFAZ
--- ============================================================
-local screenGui = Instance.new("ScreenGui")
-screenGui.Name = "SkyChanger"
-screenGui.ResetOnSpawn = false
-screenGui.Parent = LP:WaitForChild("PlayerGui")
+local gui = Instance.new("ScreenGui")
+gui.Name = "SkyChanger"
+gui.ResetOnSpawn = false
+gui.Parent = LP:WaitForChild("PlayerGui")
 
 local frame = Instance.new("Frame")
-frame.Size = UDim2.new(0, 220, 0, 200)
-frame.Position = UDim2.new(0.5, -110, 0.5, -100)
-frame.BackgroundColor3 = Color3.fromRGB(25, 25, 35)
+frame.Size = UDim2.new(0, 220, 0, 210)
+frame.Position = UDim2.new(0.5, -110, 0.5, -105)
+frame.BackgroundColor3 = Color3.fromRGB(25,25,35)
 frame.BorderSizePixel = 0
-frame.Parent = screenGui
-
-local corner = Instance.new("UICorner")
-corner.CornerRadius = UDim.new(0, 10)
-corner.Parent = frame
+frame.Active = true
+frame.Draggable = true
+frame.Parent = gui
+Instance.new("UICorner", frame).CornerRadius = UDim.new(0, 10)
 
 local title = Instance.new("TextLabel")
-title.Size = UDim2.new(1, 0, 0, 24)
-title.Position = UDim2.new(0, 0, 0, 4)
+title.Size = UDim2.new(1,0,0,26)
 title.BackgroundTransparency = 1
-title.Text = "Cambiar Cielo - Brookhaven"
-title.TextColor3 = Color3.fromRGB(200, 220, 255)
+title.Text = "Cambiar Cielo (solo tú lo ves)"
+title.TextColor3 = Color3.fromRGB(200,220,255)
 title.Font = Enum.Font.GothamBold
 title.TextSize = 12
 title.Parent = frame
 
-local info = Instance.new("TextLabel")
-info.Size = UDim2.new(0.9, 0, 0, 40)
-info.Position = UDim2.new(0.05, 0, 0, 30)
-info.BackgroundTransparency = 1
-info.Text = "El cielo solo será visible\npara ti (cliente local)"
-info.TextColor3 = Color3.fromRGB(150, 150, 170)
-info.Font = Enum.Font.Gotham
-info.TextSize = 10
-info.TextWrapped = true
-info.Parent = frame
-
-local function makeBtn(text, y, color, callback)
-    local btn = Instance.new("TextButton")
-    btn.Size = UDim2.new(0.9, 0, 0, 28)
-    btn.Position = UDim2.new(0.05, 0, 0, y)
-    btn.BackgroundColor3 = color
-    btn.Text = text
-    btn.TextColor3 = Color3.fromRGB(255,255,255)
-    btn.Font = Enum.Font.GothamBold
-    btn.TextSize = 10
-    btn.Parent = frame
-    local c = Instance.new("UICorner")
-    c.CornerRadius = UDim.new(0, 6)
-    c.Parent = btn
-    btn.MouseButton1Click:Connect(callback)
-    return btn
+local function makeBtn(text, y, color, cb)
+    local b = Instance.new("TextButton")
+    b.Size = UDim2.new(0.9,0,0,30)
+    b.Position = UDim2.new(0.05,0,0,y)
+    b.BackgroundColor3 = color
+    b.Text = text
+    b.TextColor3 = Color3.new(1,1,1)
+    b.Font = Enum.Font.GothamBold
+    b.TextSize = 11
+    b.Parent = frame
+    Instance.new("UICorner", b).CornerRadius = UDim.new(0, 6)
+    b.MouseButton1Click:Connect(cb)
 end
 
-local statusLbl = Instance.new("TextLabel")
-statusLbl.Size = UDim2.new(1, 0, 0, 16)
-statusLbl.Position = UDim2.new(0, 0, 0, 178)
-statusLbl.BackgroundTransparency = 1
-statusLbl.Text = "Listo"
-statusLbl.TextColor3 = Color3.fromRGB(140, 146, 170)
-statusLbl.Font = Enum.Font.Gotham
-statusLbl.TextSize = 9
-statusLbl.Parent = frame
-
-makeBtn("Aplicar cielo personalizado", 76, Color3.fromRGB(46, 190, 130), function()
-    setSkyForMe()
-    statusLbl.Text = "Cielo aplicado (solo cliente)"
+makeBtn("Día", 32, Color3.fromRGB(46,190,130), function() active = presets.Dia; applyPreset(active) end)
+makeBtn("Atardecer", 68, Color3.fromRGB(230,140,60), function() active = presets.Atardecer; applyPreset(active) end)
+makeBtn("Noche", 104, Color3.fromRGB(88,130,255), function() active = presets.Noche; applyPreset(active) end)
+makeBtn("Restaurar original", 140, Color3.fromRGB(235,80,90), restore)
+makeBtn("Cerrar", 174, Color3.fromRGB(70,70,85), function()
+    conn:Disconnect()
+    restore()
+    gui:Destroy()
 end)
 
-makeBtn("Intentar replicar a todos", 108, Color3.fromRGB(88, 130, 255), function()
-    local fired = tryFireRemotes()
-    local modified = modifyExistingSky()
-    if fired > 0 then
-        statusLbl.Text = "Remotes disparados: " .. fired
-    elseif modified then
-        statusLbl.Text = "Sky modificado (intento de réplica)"
-    else
-        statusLbl.Text = "No se encontraron remotes de cielo"
-    end
-end)
-
-makeBtn("Restaurar cielo original", 140, Color3.fromRGB(235, 80, 90), function()
-    local sky = Lighting:FindFirstChild("CustomSky")
-    if sky then sky:Destroy() end
-    statusLbl.Text = "Cielo restaurado"
-end)
-
--- ============================================================
--- EJECUCIÓN AUTOMÁTICA AL CARGAR
--- ============================================================
-setSkyForMe()
-
-print("[SkyChanger] Cargado. Cielo modificado localmente.")
-print("[SkyChanger] Para intentar replicar a otros, pulsa 'Intentar replicar a todos'.")
-print("[SkyChanger] NOTA: En Brookhaven, el cielo es controlado por el servidor.")
-print("[SkyChanger] Es probable que otros jugadores NO vean el cambio.")
+active = presets.Dia
+applyPreset(active)
