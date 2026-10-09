@@ -1,6 +1,6 @@
--- Editor de Objetos (compacto y moderno) - Delta Executor / Celular
--- Pestañas: Mover | Rotar | Escalar. Panel arrastrable y minimizable.
--- Los cambios son solo locales en tu cliente.
+-- Editor de Objetos v2 - Delta Executor / Celular
+-- Añadido: pestaña "Velocidad" con input de texto para escribir la velocidad exacta
+-- Las flechas de movimiento respetan la velocidad configurada
 
 local Players = game:GetService("Players")
 local UIS = game:GetService("UserInputService")
@@ -66,7 +66,7 @@ local function button(parent, text, size, pos, color, textSize)
 	return b
 end
 
--- Mantener presionado = repetir
+-- Mantener presionado = repetir con la velocidad configurada
 local function bindHold(b, fn)
 	local token = 0
 	b.InputBegan:Connect(function(i)
@@ -77,7 +77,7 @@ local function bindHold(b, fn)
 			task.delay(0.35, function()
 				while token == my do
 					fn()
-					task.wait(0.07)
+					task.wait(math.max(0.01, 0.07 / speedMultiplier))
 				end
 			end)
 		end
@@ -95,10 +95,12 @@ end
 local sel, hl = nil, nil
 local selecting = false
 local moveStep, rotStep, scaleStep = 1, 15, 0.10
+local speedMultiplier = 1      -- multiplicador de velocidad de repetición
+local customSpeed = nil        -- velocidad exacta escrita por el usuario (studs por segundo)
 local camMode = true
 local originals = setmetatable({}, {__mode = "k"})
 local pasting = false
-local setPasting -- se define en la pestaña Copiar
+local setPasting
 
 local function valid()
 	return sel ~= nil and sel.Parent ~= nil
@@ -109,13 +111,11 @@ end
 -- ============================================================
 local gui = new("ScreenGui", {Name = "StudioEditor", ResetOnSpawn = false, IgnoreGuiInset = false}, LP.PlayerGui)
 
--- Botón flotante pequeño
 local fab = button(gui, "🛠", UDim2.new(0, 38, 0, 38), UDim2.new(0, 8, 0.5, -19), C.accent, 18)
 fab.ZIndex = 5
 round(fab, 19)
 
--- Panel
-local W, H_FULL, H_MIN = 250, 312, 36
+local W, H_FULL, H_MIN = 250, 380, 36
 local panel = new("Frame", {
 	Size = UDim2.new(0, W, 0, H_FULL), Position = UDim2.new(0, 56, 0.5, -H_FULL/2),
 	BackgroundColor3 = C.bg, BackgroundTransparency = 0.04, BorderSizePixel = 0, ClipsDescendants = true,
@@ -123,7 +123,6 @@ local panel = new("Frame", {
 round(panel, 14)
 new("UIStroke", {Color = Color3.fromRGB(70, 76, 105), Thickness = 1, Transparency = 0.4}, panel)
 
--- Escala automática según la pantalla
 local uiScale = new("UIScale", {}, panel)
 local function updateScale()
 	local vp = workspace.CurrentCamera.ViewportSize
@@ -132,27 +131,25 @@ end
 updateScale()
 workspace.CurrentCamera:GetPropertyChangedSignal("ViewportSize"):Connect(updateScale)
 
--- Header (arrastrable)
 local header = new("Frame", {Size = UDim2.new(1, 0, 0, H_MIN), BackgroundColor3 = C.header, BorderSizePixel = 0}, panel)
-label(header, "🛠  Editor de Objetos", UDim2.new(1, -80, 1, 0), UDim2.new(0, 12, 0, 0), 13)
+label(header, "🛠  Editor de Objetos v2", UDim2.new(1, -80, 1, 0), UDim2.new(0, 12, 0, 0), 13)
 local minBtn = button(header, "–", UDim2.new(0, 28, 0, 24), UDim2.new(1, -66, 0, 6), C.btn, 16)
 local closeBtn = button(header, "✕", UDim2.new(0, 28, 0, 24), UDim2.new(1, -34, 0, 6), C.danger, 12)
 
--- Cuerpo
 local body = new("Frame", {Size = UDim2.new(1, -20, 1, -H_MIN - 8), Position = UDim2.new(0, 10, 0, H_MIN + 6), BackgroundTransparency = 1}, panel)
 
--- Info
 local info = new("Frame", {Size = UDim2.new(1, 0, 0, 34), BackgroundColor3 = C.card, BorderSizePixel = 0}, body)
 round(info, 8)
 local infoName = label(info, "Ningún objeto seleccionado", UDim2.new(1, -16, 0, 16), UDim2.new(0, 8, 0, 3), 12)
 local infoPos = label(info, "Pulsa Seleccionar y toca un objeto", UDim2.new(1, -16, 0, 14), UDim2.new(0, 8, 0, 18), 10, C.dim)
 
--- Pestañas
-local tabNames = {"Mover", "Rotar", "Escalar", "Copiar"}
+-- Pestañas (5 ahora)
+local tabNames = {"Mover", "Rotar", "Escalar", "Velocidad", "Copiar"}
 local tabBtns, tabFrames = {}, {}
+local tabWidth = 44
 for i, name in ipairs(tabNames) do
-	tabBtns[name] = button(body, name, UDim2.new(0, 54, 0, 28), UDim2.new(0, (i-1)*58.67, 0, 40), C.btn, 11)
-	tabFrames[name] = new("Frame", {Size = UDim2.new(1, 0, 0, 150), Position = UDim2.new(0, 0, 0, 74), BackgroundTransparency = 1, Visible = false}, body)
+	tabBtns[name] = button(body, name, UDim2.new(0, tabWidth, 0, 26), UDim2.new(0, (i-1)*(tabWidth+2), 0, 40), C.btn, 10)
+	tabFrames[name] = new("Frame", {Size = UDim2.new(1, 0, 0, 160), Position = UDim2.new(0, 0, 0, 70), BackgroundTransparency = 1, Visible = false}, body)
 end
 local function showTab(name)
 	for n, f in pairs(tabFrames) do
@@ -164,10 +161,7 @@ local function showTab(name)
 end
 for n, b in pairs(tabBtns) do b.MouseButton1Click:Connect(function() showTab(n) end) end
 
--- ============================================================
--- INFO / ACCIONES
--- ============================================================
-local scaleInfo -- se define en la pestaña Escalar
+local scaleInfo
 
 local function refresh()
 	if not valid() then
@@ -225,9 +219,15 @@ local function dir(name)
 	return Vector3.zero
 end
 
+-- Movimiento: si hay velocidad personalizada, usa studs por segundo
 local function move(name)
 	if not valid() then return end
-	sel:PivotTo(sel:GetPivot() + dir(name) * moveStep)
+	local step = moveStep
+	if customSpeed and customSpeed > 0 then
+		-- Aproximación: 0.07 segundos por repetición * velocidad
+		step = customSpeed * 0.07
+	end
+	sel:PivotTo(sel:GetPivot() + dir(name) * step)
 	refresh()
 end
 
@@ -261,7 +261,6 @@ local function resetAll()
 	refresh()
 end
 
--- Selector de valores (chips)
 local function chips(parent, y, options, fmt, default, onPick)
 	local n = #options
 	local gap = 6
@@ -342,12 +341,64 @@ do
 end
 
 -- ============================================================
+-- PESTAÑA VELOCIDAD (NUEVA)
+-- ============================================================
+do
+	local f = tabFrames["Velocidad"]
+
+	label(f, "Velocidad de movimiento (studs/seg):", UDim2.new(1, 0, 0, 16), UDim2.new(0, 0, 0, 0), 11, C.dim, Enum.TextXAlignment.Left)
+
+	-- Caja de texto para escribir la velocidad exacta
+	local box = new("TextBox", {
+		Size = UDim2.new(1, 0, 0, 34), Position = UDim2.new(0, 0, 0, 20),
+		BackgroundColor3 = C.card, Text = "1", PlaceholderText = "Escribe ej: 5, 20, 100",
+		TextColor3 = C.text, Font = Enum.Font.GothamBold, TextSize = 14,
+		TextXAlignment = Enum.TextXAlignment.Center, ClearTextOnFocus = false, BorderSizePixel = 0,
+	}, f)
+	round(box, 8)
+
+	-- Botón aplicar
+	local applyBtn = button(f, "APLICAR VELOCIDAD", UDim2.new(1, 0, 0, 30), UDim2.new(0, 0, 0, 60), C.good, 12)
+
+	local speedStatus = label(f, "Velocidad actual: 1 stud/seg", UDim2.new(1, 0, 0, 16), UDim2.new(0, 0, 0, 96), 10, C.dim, Enum.TextXAlignment.Center)
+
+	applyBtn.MouseButton1Click:Connect(function()
+		local num = tonumber(box.Text)
+		if num and num > 0 and num <= 5000 then
+			customSpeed = num
+			speedMultiplier = math.clamp(num / 1, 0.1, 50)
+			speedStatus.Text = "Velocidad actual: " .. num .. " studs/seg"
+			speedStatus.TextColor3 = C.good
+		else
+			speedStatus.Text = "Valor inválido (usa 1-5000)"
+			speedStatus.TextColor3 = C.danger
+		end
+	end)
+
+	-- Presets rápidos
+	label(f, "Presets:", UDim2.new(1, 0, 0, 14), UDim2.new(0, 0, 0, 118), 10, C.dim, Enum.TextXAlignment.Left)
+	local presets = {1, 5, 10, 50, 100, 500}
+	local px, py = 0, 134
+	for i, v in ipairs(presets) do
+		local b = button(f, tostring(v), UDim2.new(0, 36, 0, 24), UDim2.new(0, px, 0, py), C.btn, 10)
+		b.MouseButton1Click:Connect(function()
+			box.Text = tostring(v)
+			customSpeed = v
+			speedMultiplier = math.clamp(v / 1, 0.1, 50)
+			speedStatus.Text = "Velocidad actual: " .. v .. " studs/seg"
+			speedStatus.TextColor3 = C.good
+		end)
+		px = px + 38
+		if i == 3 then px = 0 py = py + 28 end
+	end
+end
+
+-- ============================================================
 -- BARRA INFERIOR
 -- ============================================================
-local selBtn = button(body, "Seleccionar", UDim2.new(0, 130, 0, 34), UDim2.new(0, 0, 0, 232), C.good, 13)
-local parBtn = button(body, "Padre", UDim2.new(0, 44, 0, 34), UDim2.new(0, 136, 0, 232), C.btn, 10)
-local rstBtn = button(body, "Reset", UDim2.new(0, 44, 0, 34), UDim2.new(0, 186, 0, 232), C.danger, 10)
--- (130 + 6 + 44 + 6 + 44 = 230)
+local selBtn = button(body, "Seleccionar", UDim2.new(0, 130, 0, 34), UDim2.new(0, 0, 0, 242), C.good, 13)
+local parBtn = button(body, "Padre", UDim2.new(0, 44, 0, 34), UDim2.new(0, 136, 0, 242), C.btn, 10)
+local rstBtn = button(body, "Reset", UDim2.new(0, 44, 0, 34), UDim2.new(0, 186, 0, 242), C.danger, 10)
 
 local function setSelecting(v)
 	if v and pasting then setPasting(false) end
@@ -369,7 +420,7 @@ end)
 rstBtn.MouseButton1Click:Connect(resetAll)
 
 -- ============================================================
--- PESTAÑA COPIAR
+-- PESTAÑA COPIAR (igual que antes)
 -- ============================================================
 local clip = nil
 local statusLbl, pasteTapBtn
@@ -384,7 +435,6 @@ local function stripHL(o)
 	end
 end
 
--- Clona aunque el objeto tenga Archivable = false
 local function cloneObj(obj)
 	local changed = {}
 	local list = obj:GetDescendants()
@@ -564,4 +614,4 @@ fab.MouseButton1Click:Connect(function() panel.Visible = not panel.Visible end)
 
 showTab("Mover")
 refresh()
-print("[StudioEditor] Listo. Usa 🛠 para abrir/cerrar. Cambios solo locales.")
+print("[StudioEditor v2] Listo. Pestaña Velocidad añadida. Cambios solo locales.")
