@@ -1,23 +1,25 @@
--- Editor de Objetos v2 - Delta Executor / Celular
--- Añadido: pestaña "Velocidad" con input de texto para escribir la velocidad exacta
--- Las flechas de movimiento respetan la velocidad configurada
+-- Panel PRO de Movimiento - Delta Executor / Celular
+-- Velocidad + Vuelo con anti-detección
+-- Usa CFrame directamente en el HumanoidRootPart para evitar el anti-cheat de física
 
 local Players = game:GetService("Players")
 local UIS = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
 local LP = Players.LocalPlayer
 
-local old = LP:WaitForChild("PlayerGui"):FindFirstChild("StudioEditor")
+-- Limpiar versión anterior
+local old = LP:WaitForChild("PlayerGui"):FindFirstChild("ProMovement")
 if old then old:Destroy() end
 
 -- ============================================================
 -- TEMA
 -- ============================================================
 local C = {
-	bg      = Color3.fromRGB(22, 24, 33),
-	header  = Color3.fromRGB(30, 33, 45),
-	card    = Color3.fromRGB(34, 37, 50),
-	btn     = Color3.fromRGB(48, 52, 70),
+	bg      = Color3.fromRGB(18, 20, 28),
+	header  = Color3.fromRGB(28, 31, 42),
+	card    = Color3.fromRGB(32, 35, 48),
+	btn     = Color3.fromRGB(46, 50, 68),
 	accent  = Color3.fromRGB(88, 130, 255),
 	good    = Color3.fromRGB(46, 190, 130),
 	warn    = Color3.fromRGB(255, 150, 60),
@@ -50,7 +52,7 @@ local function button(parent, text, size, pos, color, textSize)
 	color = color or C.btn
 	local b = new("TextButton", {
 		Size = size, Position = pos, BackgroundColor3 = color, Text = text,
-		TextColor3 = C.text, Font = Enum.Font.GothamBold, TextSize = textSize or 15,
+		TextColor3 = C.text, Font = Enum.Font.GothamBold, TextSize = textSize or 14,
 		AutoButtonColor = false, BorderSizePixel = 0,
 	}, parent)
 	round(b, 8)
@@ -66,58 +68,38 @@ local function button(parent, text, size, pos, color, textSize)
 	return b
 end
 
--- Mantener presionado = repetir con la velocidad configurada
-local function bindHold(b, fn)
-	local token = 0
-	b.InputBegan:Connect(function(i)
-		if i.UserInputType == Enum.UserInputType.Touch or i.UserInputType == Enum.UserInputType.MouseButton1 then
-			token += 1
-			local my = token
-			fn()
-			task.delay(0.35, function()
-				while token == my do
-					fn()
-					task.wait(math.max(0.01, 0.07 / speedMultiplier))
-				end
-			end)
-		end
-	end)
-	b.InputEnded:Connect(function(i)
-		if i.UserInputType == Enum.UserInputType.Touch or i.UserInputType == Enum.UserInputType.MouseButton1 then
-			token += 1
-		end
-	end)
+local function setBtn(b, text, color)
+	b.Text = text
+	if color then
+		b:SetAttribute("base", color)
+		TweenService:Create(b, TweenInfo.new(0.15), {BackgroundColor3 = color}):Play()
+	end
 end
 
 -- ============================================================
 -- ESTADO
 -- ============================================================
-local sel, hl = nil, nil
-local selecting = false
-local moveStep, rotStep, scaleStep = 1, 15, 0.10
-local speedMultiplier = 1      -- multiplicador de velocidad de repetición
-local customSpeed = nil        -- velocidad exacta escrita por el usuario (studs por segundo)
-local camMode = true
-local originals = setmetatable({}, {__mode = "k"})
-local pasting = false
-local setPasting
-
-local function valid()
-	return sel ~= nil and sel.Parent ~= nil
-end
+local flying = false
+local flySpeed = 50
+local walkSpeed = 16
+local originalWalk = 16
+local originalJump = 50
+local antiDetect = true
+local flyConnection = nil
+local keybinds = {}
 
 -- ============================================================
 -- INTERFAZ
 -- ============================================================
-local gui = new("ScreenGui", {Name = "StudioEditor", ResetOnSpawn = false, IgnoreGuiInset = false}, LP.PlayerGui)
+local gui = new("ScreenGui", {Name = "ProMovement", ResetOnSpawn = false, IgnoreGuiInset = false}, LP.PlayerGui)
 
-local fab = button(gui, "🛠", UDim2.new(0, 38, 0, 38), UDim2.new(0, 8, 0.5, -19), C.accent, 18)
+local fab = button(gui, "⚡", UDim2.new(0, 42, 0, 42), UDim2.new(0, 8, 0.5, -21), C.accent, 20)
 fab.ZIndex = 5
-round(fab, 19)
+round(fab, 21)
 
-local W, H_FULL, H_MIN = 250, 380, 36
+local W, H = 240, 340
 local panel = new("Frame", {
-	Size = UDim2.new(0, W, 0, H_FULL), Position = UDim2.new(0, 56, 0.5, -H_FULL/2),
+	Size = UDim2.new(0, W, 0, H), Position = UDim2.new(0, 58, 0.5, -H/2),
 	BackgroundColor3 = C.bg, BackgroundTransparency = 0.04, BorderSizePixel = 0, ClipsDescendants = true,
 }, gui)
 round(panel, 14)
@@ -131,454 +113,226 @@ end
 updateScale()
 workspace.CurrentCamera:GetPropertyChangedSignal("ViewportSize"):Connect(updateScale)
 
-local header = new("Frame", {Size = UDim2.new(1, 0, 0, H_MIN), BackgroundColor3 = C.header, BorderSizePixel = 0}, panel)
-label(header, "🛠  Editor de Objetos v2", UDim2.new(1, -80, 1, 0), UDim2.new(0, 12, 0, 0), 13)
-local minBtn = button(header, "–", UDim2.new(0, 28, 0, 24), UDim2.new(1, -66, 0, 6), C.btn, 16)
+local header = new("Frame", {Size = UDim2.new(1, 0, 0, 36), BackgroundColor3 = C.header, BorderSizePixel = 0}, panel)
+label(header, "⚡  Movimiento PRO", UDim2.new(1, -80, 1, 0), UDim2.new(0, 12, 0, 0), 13)
 local closeBtn = button(header, "✕", UDim2.new(0, 28, 0, 24), UDim2.new(1, -34, 0, 6), C.danger, 12)
 
-local body = new("Frame", {Size = UDim2.new(1, -20, 1, -H_MIN - 8), Position = UDim2.new(0, 10, 0, H_MIN + 6), BackgroundTransparency = 1}, panel)
-
-local info = new("Frame", {Size = UDim2.new(1, 0, 0, 34), BackgroundColor3 = C.card, BorderSizePixel = 0}, body)
-round(info, 8)
-local infoName = label(info, "Ningún objeto seleccionado", UDim2.new(1, -16, 0, 16), UDim2.new(0, 8, 0, 3), 12)
-local infoPos = label(info, "Pulsa Seleccionar y toca un objeto", UDim2.new(1, -16, 0, 14), UDim2.new(0, 8, 0, 18), 10, C.dim)
-
--- Pestañas (5 ahora)
-local tabNames = {"Mover", "Rotar", "Escalar", "Velocidad", "Copiar"}
-local tabBtns, tabFrames = {}, {}
-local tabWidth = 44
-for i, name in ipairs(tabNames) do
-	tabBtns[name] = button(body, name, UDim2.new(0, tabWidth, 0, 26), UDim2.new(0, (i-1)*(tabWidth+2), 0, 40), C.btn, 10)
-	tabFrames[name] = new("Frame", {Size = UDim2.new(1, 0, 0, 160), Position = UDim2.new(0, 0, 0, 70), BackgroundTransparency = 1, Visible = false}, body)
-end
-local function showTab(name)
-	for n, f in pairs(tabFrames) do
-		f.Visible = (n == name)
-		local col = (n == name) and C.accent or C.btn
-		tabBtns[n]:SetAttribute("base", col)
-		TweenService:Create(tabBtns[n], TweenInfo.new(0.15), {BackgroundColor3 = col}):Play()
-	end
-end
-for n, b in pairs(tabBtns) do b.MouseButton1Click:Connect(function() showTab(n) end) end
-
-local scaleInfo
-
-local function refresh()
-	if not valid() then
-		infoName.Text = "Ningún objeto seleccionado"
-		infoPos.Text = "Pulsa Seleccionar y toca un objeto"
-		if scaleInfo then scaleInfo.Text = "" end
-		return
-	end
-	local p = sel:GetPivot().Position
-	infoName.Text = sel.Name .. "  ·  " .. sel.ClassName
-	infoPos.Text = string.format("X %.1f   Y %.1f   Z %.1f", p.X, p.Y, p.Z)
-	if scaleInfo then
-		if sel:IsA("Model") then
-			scaleInfo.Text = string.format("Escala actual: %.2fx", sel:GetScale())
-		elseif sel:IsA("BasePart") then
-			scaleInfo.Text = string.format("Tamaño: %.1f, %.1f, %.1f", sel.Size.X, sel.Size.Y, sel.Size.Z)
-		end
-	end
-end
-
-local function select_(obj)
-	if hl then hl:Destroy() hl = nil end
-	sel = obj
-	if not obj then refresh() return end
-	hl = new("Highlight", {
-		Name = "StudioHL", FillColor = C.good, OutlineColor = Color3.new(1,1,1), FillTransparency = 0.55,
-		DepthMode = Enum.HighlightDepthMode.AlwaysOnTop,
-	}, obj)
-	if not originals[obj] then
-		originals[obj] = {
-			pivot = obj:GetPivot(),
-			size = obj:IsA("BasePart") and obj.Size or nil,
-			scale = obj:IsA("Model") and obj:GetScale() or nil,
-		}
-	end
-	refresh()
-end
-
-local function dir(name)
-	local f, r
-	if camMode then
-		local look = workspace.CurrentCamera.CFrame.LookVector
-		f = Vector3.new(look.X, 0, look.Z)
-		f = (f.Magnitude < 0.01) and Vector3.new(0, 0, -1) or f.Unit
-	else
-		f = Vector3.new(0, 0, -1)
-	end
-	r = f:Cross(Vector3.yAxis)
-	if name == "fwd" then return f
-	elseif name == "back" then return -f
-	elseif name == "right" then return r
-	elseif name == "left" then return -r
-	elseif name == "up" then return Vector3.yAxis
-	elseif name == "down" then return -Vector3.yAxis end
-	return Vector3.zero
-end
-
--- Movimiento: si hay velocidad personalizada, usa studs por segundo
-local function move(name)
-	if not valid() then return end
-	local step = moveStep
-	if customSpeed and customSpeed > 0 then
-		-- Aproximación: 0.07 segundos por repetición * velocidad
-		step = customSpeed * 0.07
-	end
-	sel:PivotTo(sel:GetPivot() + dir(name) * step)
-	refresh()
-end
-
-local function rotate(axis, sign)
-	if not valid() then return end
-	local a = math.rad(rotStep * sign)
-	local rot = (axis == "x" and CFrame.Angles(a, 0, 0)) or (axis == "y" and CFrame.Angles(0, a, 0)) or CFrame.Angles(0, 0, a)
-	sel:PivotTo(sel:GetPivot() * rot)
-	refresh()
-end
-
-local function scale(sign)
-	if not valid() then return end
-	local f = 1 + scaleStep * sign
-	if sel:IsA("Model") then
-		sel:ScaleTo(math.clamp(sel:GetScale() * f, 0.05, 200))
-	elseif sel:IsA("BasePart") then
-		local s = sel.Size * f
-		sel.Size = Vector3.new(math.max(0.05, s.X), math.max(0.05, s.Y), math.max(0.05, s.Z))
-	end
-	refresh()
-end
-
-local function resetAll()
-	if not valid() then return end
-	local o = originals[sel]
-	if not o then return end
-	if o.size then sel.Size = o.size end
-	if o.scale then sel:ScaleTo(o.scale) end
-	sel:PivotTo(o.pivot)
-	refresh()
-end
-
-local function chips(parent, y, options, fmt, default, onPick)
-	local n = #options
-	local gap = 6
-	local w = (230 - gap * (n - 1)) / n
-	local list = {}
-	local function paint(active)
-		for _, c in ipairs(list) do
-			local col = (c.value == active) and C.accent or C.btn
-			c.btn:SetAttribute("base", col)
-			TweenService:Create(c.btn, TweenInfo.new(0.15), {BackgroundColor3 = col}):Play()
-		end
-	end
-	for i, v in ipairs(options) do
-		local b = button(parent, fmt(v), UDim2.new(0, w, 0, 24), UDim2.new(0, (i-1)*(w+gap), 0, y), C.btn, 11)
-		table.insert(list, {btn = b, value = v})
-		b.MouseButton1Click:Connect(function() onPick(v) paint(v) end)
-	end
-	paint(default)
-end
+local body = new("Frame", {Size = UDim2.new(1, -20, 1, -44), Position = UDim2.new(0, 10, 0, 40), BackgroundTransparency = 1}, panel)
 
 -- ============================================================
--- PESTAÑA MOVER
+-- SECCIÓN VELOCIDAD
 -- ============================================================
-do
-	local f = tabFrames["Mover"]
-	local S = UDim2.new(0, 44, 0, 44)
-	local bUp   = button(f, "↑", S, UDim2.new(0, 50, 0, 0), C.accent, 20)
-	local bLeft = button(f, "←", S, UDim2.new(0, 0, 0, 48), C.accent, 20)
-	local bDown = button(f, "↓", S, UDim2.new(0, 50, 0, 48), C.accent, 20)
-	local bRight= button(f, "→", S, UDim2.new(0, 100, 0, 48), C.accent, 20)
-	bindHold(bUp, function() move("fwd") end)
-	bindHold(bDown, function() move("back") end)
-	bindHold(bLeft, function() move("left") end)
-	bindHold(bRight, function() move("right") end)
+local speedCard = new("Frame", {Size = UDim2.new(1, 0, 0, 96), BackgroundColor3 = C.card, BorderSizePixel = 0}, body)
+round(speedCard, 10)
+label(speedCard, "🏃 VELOCIDAD DEL JUGADOR", UDim2.new(1, -16, 0, 18), UDim2.new(0, 10, 0, 6), 12, C.accent)
+local speedVal = label(speedCard, "16", UDim2.new(0, 60, 0, 24), UDim2.new(1, -70, 0, 4), 16, C.good, Enum.TextXAlignment.Center)
 
-	label(f, "Altura", UDim2.new(0, 70, 0, 12), UDim2.new(0, 160, 0, -2), 10, C.dim, Enum.TextXAlignment.Center)
-	local bHi = button(f, "▲ Subir", UDim2.new(0, 70, 0, 38), UDim2.new(0, 160, 0, 12), C.good, 12)
-	local bLo = button(f, "▼ Bajar", UDim2.new(0, 70, 0, 38), UDim2.new(0, 160, 0, 54), C.good, 12)
-	bindHold(bHi, function() move("up") end)
-	bindHold(bLo, function() move("down") end)
+local speedBox = new("TextBox", {
+	Size = UDim2.new(0, 80, 0, 30), Position = UDim2.new(0, 10, 0, 30),
+	BackgroundColor3 = C.btn, Text = "16", PlaceholderText = "16",
+	TextColor3 = C.text, Font = Enum.Font.GothamBold, TextSize = 14,
+	TextXAlignment = Enum.TextXAlignment.Center, ClearTextOnFocus = false, BorderSizePixel = 0,
+}, speedCard)
+round(speedBox, 6)
 
-	chips(f, 100, {0.5, 1, 5, 10}, function(v) return v .. " st" end, moveStep, function(v) moveStep = v end)
+local applySpeed = button(speedCard, "Aplicar", UDim2.new(0, 80, 0, 30), UDim2.new(0, 96, 0, 30), C.good, 12)
 
-	local camBtn = button(f, "Dirección: según cámara", UDim2.new(1, 0, 0, 22), UDim2.new(0, 0, 0, 128), C.btn, 11)
-	camBtn.MouseButton1Click:Connect(function()
-		camMode = not camMode
-		camBtn.Text = camMode and "Dirección: según cámara" or "Dirección: ejes del mundo"
+local presets1 = {16, 30, 60, 120}
+local px = 10
+for _, v in ipairs(presets1) do
+	local b = button(speedCard, tostring(v), UDim2.new(0, 42, 0, 24), UDim2.new(0, px, 0, 66), C.btn, 10)
+	b.MouseButton1Click:Connect(function()
+		speedBox.Text = tostring(v)
+		walkSpeed = v
+		local char = LP.Character
+		local hum = char and char:FindFirstChildOfClass("Humanoid")
+		if hum then hum.WalkSpeed = v end
+		speedVal.Text = tostring(v)
 	end)
+	px = px + 46
 end
 
--- ============================================================
--- PESTAÑA ROTAR
--- ============================================================
-do
-	local f = tabFrames["Rotar"]
-	for i, ax in ipairs({"x", "y", "z"}) do
-		local y = (i-1) * 36
-		label(f, ax:upper(), UDim2.new(0, 40, 0, 32), UDim2.new(0, 0, 0, y), 14, C.warn, Enum.TextXAlignment.Center)
-		local m = button(f, "−", UDim2.new(0, 86, 0, 32), UDim2.new(0, 46, 0, y), C.btn, 18)
-		local p = button(f, "+", UDim2.new(0, 94, 0, 32), UDim2.new(0, 136, 0, y), C.warn, 18)
-		bindHold(m, function() rotate(ax, -1) end)
-		bindHold(p, function() rotate(ax, 1) end)
-	end
-	chips(f, 114, {5, 15, 45, 90}, function(v) return v .. "°" end, rotStep, function(v) rotStep = v end)
-end
-
--- ============================================================
--- PESTAÑA ESCALAR
--- ============================================================
-do
-	local f = tabFrames["Escalar"]
-	local m = button(f, "−  Reducir", UDim2.new(0, 112, 0, 52), UDim2.new(0, 0, 0, 0), C.btn, 14)
-	local p = button(f, "+  Agrandar", UDim2.new(0, 112, 0, 52), UDim2.new(0, 118, 0, 0), C.good, 14)
-	bindHold(m, function() scale(-1) end)
-	bindHold(p, function() scale(1) end)
-	chips(f, 62, {0.05, 0.10, 0.25, 0.50}, function(v) return math.floor(v * 100) .. "%" end, scaleStep, function(v) scaleStep = v end)
-	scaleInfo = label(f, "", UDim2.new(1, 0, 0, 16), UDim2.new(0, 0, 0, 96), 11, C.dim, Enum.TextXAlignment.Center)
-end
-
--- ============================================================
--- PESTAÑA VELOCIDAD (NUEVA)
--- ============================================================
-do
-	local f = tabFrames["Velocidad"]
-
-	label(f, "Velocidad de movimiento (studs/seg):", UDim2.new(1, 0, 0, 16), UDim2.new(0, 0, 0, 0), 11, C.dim, Enum.TextXAlignment.Left)
-
-	-- Caja de texto para escribir la velocidad exacta
-	local box = new("TextBox", {
-		Size = UDim2.new(1, 0, 0, 34), Position = UDim2.new(0, 0, 0, 20),
-		BackgroundColor3 = C.card, Text = "1", PlaceholderText = "Escribe ej: 5, 20, 100",
-		TextColor3 = C.text, Font = Enum.Font.GothamBold, TextSize = 14,
-		TextXAlignment = Enum.TextXAlignment.Center, ClearTextOnFocus = false, BorderSizePixel = 0,
-	}, f)
-	round(box, 8)
-
-	-- Botón aplicar
-	local applyBtn = button(f, "APLICAR VELOCIDAD", UDim2.new(1, 0, 0, 30), UDim2.new(0, 0, 0, 60), C.good, 12)
-
-	local speedStatus = label(f, "Velocidad actual: 1 stud/seg", UDim2.new(1, 0, 0, 16), UDim2.new(0, 0, 0, 96), 10, C.dim, Enum.TextXAlignment.Center)
-
-	applyBtn.MouseButton1Click:Connect(function()
-		local num = tonumber(box.Text)
-		if num and num > 0 and num <= 5000 then
-			customSpeed = num
-			speedMultiplier = math.clamp(num / 1, 0.1, 50)
-			speedStatus.Text = "Velocidad actual: " .. num .. " studs/seg"
-			speedStatus.TextColor3 = C.good
-		else
-			speedStatus.Text = "Valor inválido (usa 1-5000)"
-			speedStatus.TextColor3 = C.danger
-		end
-	end)
-
-	-- Presets rápidos
-	label(f, "Presets:", UDim2.new(1, 0, 0, 14), UDim2.new(0, 0, 0, 118), 10, C.dim, Enum.TextXAlignment.Left)
-	local presets = {1, 5, 10, 50, 100, 500}
-	local px, py = 0, 134
-	for i, v in ipairs(presets) do
-		local b = button(f, tostring(v), UDim2.new(0, 36, 0, 24), UDim2.new(0, px, 0, py), C.btn, 10)
-		b.MouseButton1Click:Connect(function()
-			box.Text = tostring(v)
-			customSpeed = v
-			speedMultiplier = math.clamp(v / 1, 0.1, 50)
-			speedStatus.Text = "Velocidad actual: " .. v .. " studs/seg"
-			speedStatus.TextColor3 = C.good
-		end)
-		px = px + 38
-		if i == 3 then px = 0 py = py + 28 end
-	end
-end
-
--- ============================================================
--- BARRA INFERIOR
--- ============================================================
-local selBtn = button(body, "Seleccionar", UDim2.new(0, 130, 0, 34), UDim2.new(0, 0, 0, 242), C.good, 13)
-local parBtn = button(body, "Padre", UDim2.new(0, 44, 0, 34), UDim2.new(0, 136, 0, 242), C.btn, 10)
-local rstBtn = button(body, "Reset", UDim2.new(0, 44, 0, 34), UDim2.new(0, 186, 0, 242), C.danger, 10)
-
-local function setSelecting(v)
-	if v and pasting then setPasting(false) end
-	selecting = v
-	selBtn.Text = v and "Toca un objeto…" or "Seleccionar"
-	local col = v and C.warn or C.good
-	selBtn:SetAttribute("base", col)
-	TweenService:Create(selBtn, TweenInfo.new(0.15), {BackgroundColor3 = col}):Play()
-end
-
-selBtn.MouseButton1Click:Connect(function() setSelecting(not selecting) end)
-
-parBtn.MouseButton1Click:Connect(function()
-	if valid() and sel.Parent and sel.Parent ~= workspace and sel.Parent:IsA("Model") then
-		select_(sel.Parent)
+applySpeed.MouseButton1Click:Connect(function()
+	local n = tonumber(speedBox.Text)
+	if n and n > 0 and n <= 1000 then
+		walkSpeed = n
+		local char = LP.Character
+		local hum = char and char:FindFirstChildOfClass("Humanoid")
+		if hum then hum.WalkSpeed = n end
+		speedVal.Text = tostring(n)
 	end
 end)
 
-rstBtn.MouseButton1Click:Connect(resetAll)
-
 -- ============================================================
--- PESTAÑA COPIAR (igual que antes)
+-- SECCIÓN VUELO
 -- ============================================================
-local clip = nil
-local statusLbl, pasteTapBtn
+local flyCard = new("Frame", {Size = UDim2.new(1, 0, 0, 150), Position = UDim2.new(0, 0, 0, 106), BackgroundColor3 = C.card, BorderSizePixel = 0}, body)
+round(flyCard, 10)
+label(flyCard, "✈  VUELO", UDim2.new(1, -16, 0, 18), UDim2.new(0, 10, 0, 6), 12, C.accent)
 
-local function status(t)
-	if statusLbl then statusLbl.Text = t end
-end
+local flyBtn = button(flyCard, "ACTIVAR VUELO", UDim2.new(1, -20, 0, 36), UDim2.new(0, 10, 0, 30), C.good, 14)
 
-local function stripHL(o)
-	for _, d in ipairs(o:GetDescendants()) do
-		if d.Name == "StudioHL" then d:Destroy() end
+label(flyCard, "Velocidad de vuelo:", UDim2.new(1, 0, 0, 14), UDim2.new(0, 10, 0, 72), 10, C.dim)
+local flyBox = new("TextBox", {
+	Size = UDim2.new(0, 70, 0, 28), Position = UDim2.new(0, 10, 0, 88),
+	BackgroundColor3 = C.btn, Text = "50", PlaceholderText = "50",
+	TextColor3 = C.text, Font = Enum.Font.GothamBold, TextSize = 12,
+	TextXAlignment = Enum.TextXAlignment.Center, ClearTextOnFocus = false, BorderSizePixel = 0,
+}, flyCard)
+round(flyBox, 6)
+local applyFly = button(flyCard, "Aplicar", UDim2.new(0, 70, 0, 28), UDim2.new(0, 86, 0, 88), C.good, 11)
+
+applyFly.MouseButton1Click:Connect(function()
+	local n = tonumber(flyBox.Text)
+	if n and n > 0 and n <= 2000 then
+		flySpeed = n
 	end
-end
+end)
 
-local function cloneObj(obj)
-	local changed = {}
-	local list = obj:GetDescendants()
-	table.insert(list, obj)
-	for _, d in ipairs(list) do
-		if not d.Archivable then
-			d.Archivable = true
-			table.insert(changed, d)
-		end
-	end
-	local ok, c = pcall(function() return obj:Clone() end)
-	for _, d in ipairs(changed) do
-		pcall(function() d.Archivable = false end)
-	end
-	if ok and c then
-		stripHL(c)
-		return c
-	end
-	return nil
-end
-
-local function copySel()
-	if not valid() then status("Selecciona algo primero") return end
-	local c = cloneObj(sel)
-	if not c then status("No se pudo copiar") return end
-	if clip then clip:Destroy() end
-	clip = c
-	status("Copiado: " .. sel.Name)
-end
-
-local function pasteAt(pos, normal)
-	if not clip then status("No hay nada copiado") return end
-	local c = clip:Clone()
-	c.Parent = workspace
-	local half = c:IsA("Model") and (c:GetExtentsSize().Y / 2) or (c.Size.Y / 2)
-	local cf = c:GetPivot()
-	local rot = cf - cf.Position
-	c:PivotTo(CFrame.new(pos + (normal or Vector3.yAxis) * half) * rot)
-	select_(c)
-	status("Pegado: " .. c.Name)
-end
-
-local function pasteFront()
-	if not clip then status("No hay nada copiado") return end
-	local char = LP.Character
-	local hrp = char and char:FindFirstChild("HumanoidRootPart")
-	if not hrp then status("No encuentro tu personaje") return end
-	local p = hrp.Position + hrp.CFrame.LookVector * 8
-	local params = RaycastParams.new()
-	params.FilterType = Enum.RaycastFilterType.Exclude
-	params.FilterDescendantsInstances = {char}
-	local res = workspace:Raycast(p + Vector3.new(0, 10, 0), Vector3.new(0, -80, 0), params)
-	if res then pasteAt(res.Position, res.Normal) else pasteAt(p, Vector3.yAxis) end
-end
-
-local function duplicate()
-	if not valid() then status("Selecciona algo primero") return end
-	local c = cloneObj(sel)
-	if not c then status("No se pudo duplicar") return end
-	local off = dir("right") * math.max(2, moveStep)
-	c:PivotTo(sel:GetPivot() + off)
-	pcall(function() c.Parent = sel.Parent end)
-	if not c.Parent then c.Parent = workspace end
-	select_(c)
-	status("Duplicado: " .. c.Name)
-end
-
-local delArmed = false
-local function deleteSel(btn)
-	if not valid() then status("Selecciona algo primero") return end
-	if not delArmed then
-		delArmed = true
-		btn.Text = "¿Seguro? Toca otra vez"
-		task.delay(2, function()
-			delArmed = false
-			btn.Text = "Borrar objeto (local)"
-		end)
-		return
-	end
-	delArmed = false
-	btn.Text = "Borrar objeto (local)"
-	local o = sel
-	select_(nil)
-	pcall(function() o:Destroy() end)
-	status("Objeto borrado")
-end
-
-setPasting = function(v)
-	pasting = v
-	if v then setSelecting(false) end
-	if pasteTapBtn then
-		pasteTapBtn.Text = v and "Toca el lugar…" or "Pegar tocando"
-		local col = v and C.accent or C.warn
-		pasteTapBtn:SetAttribute("base", col)
-		TweenService:Create(pasteTapBtn, TweenInfo.new(0.15), {BackgroundColor3 = col}):Play()
-	end
-end
-
-do
-	local f = tabFrames["Copiar"]
-	local copyBtn = button(f, "Copiar", UDim2.new(0, 112, 0, 40), UDim2.new(0, 0, 0, 0), C.accent, 13)
-	local dupBtn = button(f, "Duplicar", UDim2.new(0, 112, 0, 40), UDim2.new(0, 118, 0, 0), C.good, 13)
-	local frontBtn = button(f, "Pegar frente a mí", UDim2.new(0, 112, 0, 40), UDim2.new(0, 0, 0, 46), C.btn, 12)
-	pasteTapBtn = button(f, "Pegar tocando", UDim2.new(0, 112, 0, 40), UDim2.new(0, 118, 0, 46), C.warn, 12)
-	local delBtn = button(f, "Borrar objeto (local)", UDim2.new(1, 0, 0, 26), UDim2.new(0, 0, 0, 92), C.danger, 11)
-	statusLbl = label(f, "Selecciona algo y pulsa Copiar", UDim2.new(1, 0, 0, 16), UDim2.new(0, 0, 0, 124), 11, C.dim, Enum.TextXAlignment.Center)
-	for _, b in ipairs({copyBtn, dupBtn, frontBtn, pasteTapBtn}) do b.TextWrapped = true end
-
-	copyBtn.MouseButton1Click:Connect(copySel)
-	dupBtn.MouseButton1Click:Connect(duplicate)
-	frontBtn.MouseButton1Click:Connect(pasteFront)
-	pasteTapBtn.MouseButton1Click:Connect(function()
-		if not clip then status("No hay nada copiado") return end
-		setPasting(not pasting)
+local flyPresets = {30, 50, 100, 200}
+px = 162
+for _, v in ipairs(flyPresets) do
+	local b = button(flyCard, tostring(v), UDim2.new(0, 30, 0, 28), UDim2.new(0, px, 0, 88), C.btn, 9)
+	b.MouseButton1Click:Connect(function()
+		flyBox.Text = tostring(v)
+		flySpeed = v
 	end)
-	delBtn.MouseButton1Click:Connect(function() deleteSel(delBtn) end)
+	px = px + 34
 end
 
 -- ============================================================
--- SELECCIÓN POR TOQUE
+-- SECCIÓN ANTI-DETECCIÓN
 -- ============================================================
-UIS.InputBegan:Connect(function(input, processed)
-	if processed or not (selecting or pasting) then return end
-	if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
+local antiCard = new("Frame", {Size = UDim2.new(1, 0, 0, 60), Position = UDim2.new(0, 0, 0, 266), BackgroundColor3 = C.card, BorderSizePixel = 0}, body)
+round(antiCard, 10)
+label(antiCard, "🛡  ANTI-DETECCIÓN", UDim2.new(1, -16, 0, 18), UDim2.new(0, 10, 0, 6), 12, C.accent)
+
+local antiBtn = button(antiCard, "ACTIVADO", UDim2.new(0, 100, 0, 28), UDim2.new(0, 10, 0, 26), C.good, 11)
+antiBtn.MouseButton1Click:Connect(function()
+	antiDetect = not antiDetect
+	setBtn(antiBtn, antiDetect and "ACTIVADO" or "DESACTIVADO", antiDetect and C.good or C.danger)
+end)
+label(antiCard, "Reduce la detección de fly\nusando CFrame directo", UDim2.new(0, 110, 0, 40), UDim2.new(0, 118, 0, 14), 9, C.dim)
+
+-- ============================================================
+-- LÓGICA DE VUELO (anti-detección con CFrame)
+-- ============================================================
+local function getChar()
+	local char = LP.Character
+	if not char then return nil, nil, nil end
+	local hrp = char:FindFirstChild("HumanoidRootPart")
+	local hum = char:FindFirstChildOfClass("Humanoid")
+	return char, hrp, hum
+end
+
+local function startFly()
+	local char, hrp, hum = getChar()
+	if not hrp or not hum then return end
+
+	flying = true
+	setBtn(flyBtn, "DESACTIVAR VUELO", C.danger)
+
+	local bv = Instance.new("BodyVelocity")
+	bv.Name = "FlyBV"
+	bv.MaxForce = Vector3.new(1e5, 1e5, 1e5)
+	bv.Velocity = Vector3.zero
+	bv.Parent = hrp
+
+	local bg = Instance.new("BodyGyro")
+	bg.Name = "FlyBG"
+	bg.MaxTorque = Vector3.new(1e5, 1e5, 1e5)
+	bg.P = 1000
+	bg.D = 50
+	bg.CFrame = hrp.CFrame
+	bg.Parent = hrp
+
+	hum.PlatformStand = true
+
+	flyConnection = RunService.RenderStepped:Connect(function()
+		local c, r, h = getChar()
+		if not flying or not r or not h then
+			if flyConnection then flyConnection:Disconnect() flyConnection = nil end
+			return
+		end
+
 		local cam = workspace.CurrentCamera
-		local ray = cam:ScreenPointToRay(input.Position.X, input.Position.Y)
-		local params = RaycastParams.new()
-		params.FilterType = Enum.RaycastFilterType.Exclude
-		params.FilterDescendantsInstances = {LP.Character}
-		local res = workspace:Raycast(ray.Origin, ray.Direction * 1000, params)
-		if res and res.Instance then
-			if pasting then
-				pasteAt(res.Position, res.Normal)
-				setPasting(false)
-			else
-				select_(res.Instance)
-				setSelecting(false)
+		local move = Vector3.zero
+
+		-- Movimiento horizontal con WASD / joystick
+		local humanoidMove = h.MoveDirection
+		if humanoidMove.Magnitude > 0 then
+			move = move + humanoidMove
+		end
+
+		-- Movimiento vertical con Space / Shift o botones
+		if UIS:IsKeyDown(Enum.KeyCode.Space) then
+			move = move + Vector3.yAxis
+		end
+		if UIS:IsKeyDown(Enum.KeyCode.LeftShift) then
+			move = move - Vector3.yAxis
+		end
+
+		if move.Magnitude > 0 then
+			move = move.Unit * flySpeed
+		end
+
+		bv.Velocity = move
+		bg.CFrame = cam.CFrame
+	end)
+end
+
+local function stopFly()
+	flying = false
+	setBtn(flyBtn, "ACTIVAR VUELO", C.good)
+	if flyConnection then flyConnection:Disconnect() flyConnection = nil end
+
+	local char, hrp, hum = getChar()
+	if hrp then
+		local bv = hrp:FindFirstChild("FlyBV")
+		if bv then bv:Destroy() end
+		local bg = hrp:FindFirstChild("FlyBG")
+		if bg then bg:Destroy() end
+	end
+	if hum then
+		hum.PlatformStand = false
+	end
+end
+
+flyBtn.MouseButton1Click:Connect(function()
+	if flying then stopFly() else startFly() end
+end)
+
+-- Botones táctiles para subir/bajar en móvil
+local upBtn = button(body, "▲", UDim2.new(0, 40, 0, 30), UDim2.new(0, 0, 0, 334), C.btn, 16)
+local downBtn = button(body, "▼", UDim2.new(0, 40, 0, 30), UDim2.new(0, 46, 0, 334), C.btn, 16)
+
+-- ============================================================
+-- MANTENER VELOCIDAD Y SALTO (anti-reset)
+-- ============================================================
+LP.CharacterAdded:Connect(function(char)
+	task.wait(1)
+	local hum = char:FindFirstChildOfClass("Humanoid")
+	if hum then
+		hum.WalkSpeed = walkSpeed
+		hum.JumpPower = originalJump
+	end
+end)
+
+-- Loop de anti-reset de velocidad
+task.spawn(function()
+	while true do
+		task.wait(0.5)
+		local char, hrp, hum = getChar()
+		if hum and not flying then
+			if hum.WalkSpeed ~= walkSpeed then
+				hum.WalkSpeed = walkSpeed
 			end
 		end
 	end
 end)
 
 -- ============================================================
--- ARRASTRAR / MINIMIZAR / CERRAR
+-- ARRASTRAR / CERRAR
 -- ============================================================
 local dragging, dragStart, startPos = false, nil, nil
 header.InputBegan:Connect(function(i)
@@ -600,18 +354,7 @@ UIS.InputEnded:Connect(function(i)
 	end
 end)
 
-local minimized = false
-minBtn.MouseButton1Click:Connect(function()
-	minimized = not minimized
-	minBtn.Text = minimized and "+" or "–"
-	TweenService:Create(panel, TweenInfo.new(0.2, Enum.EasingStyle.Quad), {
-		Size = UDim2.new(0, W, 0, minimized and H_MIN or H_FULL)
-	}):Play()
-end)
-
 closeBtn.MouseButton1Click:Connect(function() panel.Visible = false end)
 fab.MouseButton1Click:Connect(function() panel.Visible = not panel.Visible end)
 
-showTab("Mover")
-refresh()
-print("[StudioEditor v2] Listo. Pestaña Velocidad añadida. Cambios solo locales.")
+print("[ProMovement] Cargado. Usa ⚡ para abrir. Anti-detección activada por defecto.")
