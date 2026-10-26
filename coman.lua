@@ -1,12 +1,15 @@
 --=============================================================
---   VENICE UNIVERSAL v7
---   FLY + SPEED + DINERO UNIVERSAL + EDITOR + VEHICULO
---   Movil / Delta Executor  --  Hecho por Venice
+--   VENICE UNIVERSAL v7.1 (ARREGLADO)
+--   FLY + SPEED + DINERO + EDITOR + VEHICULO
+--   Movil / Delta Executor
 --=============================================================
---  v7 anade 3 pestanas nuevas al panel v6:
---   [$] DINERO   -> escanea monedas (IntValue/NumberValue + tablas getgc)
---   [E] EDITOR   -> seleccionar / mover / rotar / escalar / copiar / duplicar
---   [V] VEHICULO -> acelera lo que estes montado o encima
+--  CORRECCIONES:
+--   1) "pestañaActiva" tenia una Ñ: Luau no permite letras no ASCII
+--      en nombres de variables -> error de sintaxis, el script
+--      entero no cargaba. Ahora es "pestanaActiva".
+--   2) getHum se usaba antes de existir (boton del vehiculo).
+--   3) btnAutoDinero se usaba dentro de su propia creacion.
+--   4) "gui" se usaba antes de declararse.
 --=============================================================
 
 local Players           = game:GetService("Players")
@@ -15,7 +18,7 @@ local UserInputService  = game:GetService("UserInputService")
 local StarterGui        = game:GetService("StarterGui")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
-print("[Venice] v7 iniciando...")
+print("[Venice] v7.1 iniciando...")
 
 local LocalPlayer = Players.LocalPlayer
 if not LocalPlayer then
@@ -50,7 +53,7 @@ local function reportar(msg)
 		lblError.ZIndex = 50; lblError.Parent = g
 		Instance.new("UICorner", lblError).CornerRadius = UDim.new(0, 8)
 	end
-	lblError.Text = "Venice v7 ERROR:\n" .. tostring(msg)
+	lblError.Text = "Venice v7.1 ERROR:\n" .. tostring(msg)
 	warn("[Venice] " .. tostring(msg))
 end
 
@@ -78,7 +81,6 @@ local function principal()
 	local GRIS  = Color3.fromRGB(52, 52, 66)
 	local AMBAR = Color3.fromRGB(120, 95, 45)
 	local AZUL  = Color3.fromRGB(45, 90, 140)
-	local ROJO  = Color3.fromRGB(150, 55, 55)
 	local FONDO = Color3.fromRGB(18, 18, 24)
 
 	-- ============ ESTADO ============
@@ -95,7 +97,7 @@ local function principal()
 	local muertesRecientes = {}
 	local Controls
 	local minimizado = false
-	local pestañaActiva = "FLY"
+	local pestanaActiva = "FLY"
 
 	local editorOn = false
 	local seleccionado, highlight
@@ -109,6 +111,41 @@ local function principal()
 	local entradaSel
 	local valorPuesto = 999999
 	local autoDinero = false
+
+	-- ============ AYUDAS DEL PERSONAJE (ANTES DE LA GUI) ============
+	local function getChar()
+		local char = LocalPlayer.Character
+		if not char then return nil, nil end
+		return char:FindFirstChildOfClass("Humanoid"), char:FindFirstChild("HumanoidRootPart")
+	end
+	local function getHum() local h = getChar() return h end
+	local function getHRP() local _, r = getChar() return r end
+	local function vertical()
+		if upHeld and not downHeld then return 1 end
+		if downHeld and not upHeld then return -1 end
+		return 0
+	end
+
+	-- ============ DECLARACIONES ADELANTADAS ============
+	local gui
+	local panel, header, btnMin, btnOcultar, btnArriba, btnAbajo
+	local lblVueloVal, lblCorrerVal, pista
+	local btnVuelo, btnSpeed, btnModo, btnAuto, btnAnti, btnRetro, btnMuerte, btnSuave
+	local minusV, plusV, minusC, plusC
+	local contenidos, botonesPestana = {}, {}
+	local listaMonedas, lblSelDinero, cajaDinero, lblCuenta
+	local lblSelEditor
+	local lblEstadoVeh
+	local btnAutoDinero
+
+	local toggleVuelo, toggleSpeed, ciclarModo, toggleAuto, toggleAnti, toggleRetro, ciclarMuerte, toggleSuave
+	local cambiarV, cambiarC, actualizarInfo, cambiarPestana
+	local pintarAuto, pintarAnti, pintarRetro, pintarMuerte, pintarSuave
+	local escanearDinero, refrescarLista, ponerValor, multiplicarValor, quickValor
+	local toggleEditor, seleccionar, seleccionarEn, moverSel, rotarSel, escalarSel
+	local duplicarSel, copiarSel, pegarSel, borrarSel, anclarSel, colisionSel, transSel
+	local irAlObjeto, traerObjeto
+	local toggleVehiculo
 
 	-- ============ SISTEMA DE TOQUE ============
 	local registros = {}
@@ -147,30 +184,11 @@ local function principal()
 		table.insert(registros, { btn = btn, tipo = "hold", bajar = bajar, soltar = soltar, presionado = nil })
 	end
 
-	-- ============ DECLARACIONES ADELANTADAS ============
-	local panel, header, btnMin, btnOcultar, btnArriba, btnAbajo
-	local lblVueloVal, lblCorrerVal, pista
-	local btnVuelo, btnSpeed, btnModo, btnAuto, btnAnti, btnRetro, btnMuerte, btnSuave
-	local minusV, plusV, minusC, plusC
-	local contenidos, botonesPestana = {}, {}
-	local listaMonedas, lblSelDinero, cajaDinero, lblCuenta
-	local lblSelEditor
-	local lblEstadoVeh
-
-	local toggleVuelo, toggleSpeed, ciclarModo, toggleAuto, toggleAnti, toggleRetro, ciclarMuerte, toggleSuave
-	local cambiarV, cambiarC, actualizarInfo, cambiarPestana
-	local pintarAuto, pintarAnti, pintarRetro, pintarMuerte, pintarSuave
-	local escanearDinero, refrescarLista, ponerValor, multiplicarValor, quickValor
-	local toggleEditor, seleccionar, seleccionarEn, moverSel, rotarSel, escalarSel
-	local duplicarSel, copiarSel, pegarSel, borrarSel, anclarSel, colisionSel, transSel
-	local irAlObjeto, traerObjeto
-	local toggleVehiculo
-
 	-- ============ GUI ============
 	local vieja = PlayerGui:FindFirstChild("VenicePanel")
 	if vieja then vieja:Destroy() end
 
-	local gui = Instance.new("ScreenGui")
+	gui = Instance.new("ScreenGui")
 	gui.Name = "VenicePanel"; gui.ResetOnSpawn = false
 	gui.IgnoreGuiInset = true; gui.DisplayOrder = 1000000
 	gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
@@ -196,7 +214,7 @@ local function principal()
 	titulo.Size = UDim2.new(1, -46, 1, 0)
 	titulo.Position = UDim2.new(0, 12, 0, 0)
 	titulo.BackgroundTransparency = 1
-	titulo.Text = "VENICE  •  UNIVERSAL v7"
+	titulo.Text = "VENICE  •  UNIVERSAL v7.1"
 	titulo.TextColor3 = Color3.fromRGB(235, 235, 245)
 	titulo.Font = Enum.Font.GothamBold; titulo.TextSize = 12
 	titulo.TextXAlignment = Enum.TextXAlignment.Left
@@ -208,7 +226,7 @@ local function principal()
 	btnMin.BackgroundColor3 = GRIS
 	btnMin.TextColor3 = Color3.fromRGB(255, 255, 255)
 	btnMin.Font = Enum.Font.GothamBold; btnMin.TextSize = 14
-	btnMin.Text = "—"; btnMin.BorderSizePixel = 0; btnMin.Parent = header
+	btnMin.Text = "-"; btnMin.BorderSizePixel = 0; btnMin.Parent = header
 	Instance.new("UICorner", btnMin).CornerRadius = UDim.new(0, 6)
 
 	-- helper de botones
@@ -286,7 +304,7 @@ local function principal()
 	btnAnti, btnRetro = fila2(cFly, "ANTI-DETECT: ON", function() toggleAnti() end, "ANTI-RETRO: ON", function() toggleRetro() end, 90)
 	btnMuerte, btnSuave = fila2(cFly, "ANTI-MUERTE: VELOCIDAD", function() ciclarMuerte() end, "SUAVE: ON", function() toggleSuave() end, 120)
 
-	local function filaVelocidad(padre, y, etiqueta, esVuelo)
+	local function filaVelocidad(padre, y, etiqueta)
 		local lbl = Instance.new("TextLabel")
 		lbl.Size = UDim2.new(1, -20, 0, 11)
 		lbl.Position = UDim2.new(0, 2, 0, y)
@@ -296,7 +314,7 @@ local function principal()
 		lbl.TextXAlignment = Enum.TextXAlignment.Left
 		lbl.Text = etiqueta; lbl.Parent = padre
 
-		local m = B(padre, "−", 0, y + 12, 44, 28)
+		local m = B(padre, "-", 0, y + 12, 44, 28)
 		local v = Instance.new("TextLabel")
 		v.Size = UDim2.new(0, 116, 0, 28); v.Position = UDim2.new(0, 50, 0, y + 12)
 		v.BackgroundColor3 = Color3.fromRGB(26, 26, 34)
@@ -308,8 +326,8 @@ local function principal()
 		return v, m, p
 	end
 
-	lblVueloVal, minusV, plusV = filaVelocidad(cFly, 152, "VELOCIDAD DE VUELO", true)
-	lblCorrerVal, minusC, plusC = filaVelocidad(cFly, 190, "VELOCIDAD AL CORRER", false)
+	lblVueloVal, minusV, plusV = filaVelocidad(cFly, 152, "VELOCIDAD DE VUELO")
+	lblCorrerVal, minusC, plusC = filaVelocidad(cFly, 190, "VELOCIDAD AL CORRER")
 
 	pista = Instance.new("TextLabel")
 	pista.Size = UDim2.new(1, 0, 0, 24); pista.Position = UDim2.new(0, 2, 0, 232)
@@ -317,7 +335,7 @@ local function principal()
 	pista.TextColor3 = Color3.fromRGB(130, 130, 150)
 	pista.Font = Enum.Font.Gotham; pista.TextSize = 9; pista.TextWrapped = true
 	pista.TextXAlignment = Enum.TextXAlignment.Left
-	pista.Text = "Teclas: F vuelo · G speed · Espacio subir · Shift bajar"
+	pista.Text = "Teclas: F vuelo - G speed - Espacio subir - Shift bajar"
 	pista.Parent = cFly
 
 	-- ==================== PESTANA DINERO ====================
@@ -342,7 +360,7 @@ local function principal()
 	B(cDinero, "1e9", 158, 60, 76, 26, function() quickValor(1000000000) end)
 	B(cDinero, "+1M", 0, 90, 74, 26, function() quickValor(1000000) end)
 	B(cDinero, "x10", 79, 90, 74, 26, function() multiplicarValor(10) end)
-	local btnAutoDinero = B(cDinero, "AUTO: OFF", 158, 90, 76, 26, function()
+	btnAutoDinero = B(cDinero, "AUTO: OFF", 158, 90, 76, 26, function()
 		autoDinero = not autoDinero
 		btnAutoDinero.Text = autoDinero and "AUTO: ON" or "AUTO: OFF"
 		btnAutoDinero.BackgroundColor3 = autoDinero and VERDE or GRIS
@@ -388,7 +406,7 @@ local function principal()
 	lblSelEditor.Text = "SEL: (toca un objeto en el mundo)"
 	lblSelEditor.Parent = cEditor
 
-	fila3(cEditor, { "X −", "Y −", "Z −" }, {
+	fila3(cEditor, { "X -", "Y -", "Z -" }, {
 		function() moverSel(-pasoEditor, 0, 0) end,
 		function() moverSel(0, pasoEditor, 0) end,
 		function() moverSel(0, 0, -pasoEditor) end,
@@ -398,22 +416,25 @@ local function principal()
 		function() moverSel(0, -pasoEditor, 0) end,
 		function() moverSel(0, 0, pasoEditor) end,
 	}, 76)
-	fila3(cEditor, { "↺ X", "↺ Y", "↺ Z" }, {
+	fila3(cEditor, { "Rot X", "Rot Y", "Rot Z" }, {
 		function() rotarSel("X", 15) end,
 		function() rotarSel("Y", 15) end,
 		function() rotarSel("Z", 15) end,
 	}, 104)
-	fila3(cEditor, { "↻ X", "↻ Y", "↻ Z" }, {
+	fila3(cEditor, { "Rot -X", "Rot -Y", "Rot -Z" }, {
 		function() rotarSel("X", -15) end,
 		function() rotarSel("Y", -15) end,
 		function() rotarSel("Z", -15) end,
 	}, 132)
-	fila3(cEditor, { "Tamaño −", "Tamaño +", "Paso " .. pasoEditor }, {
+
+	local btnsTam
+	btnsTam = fila3(cEditor, { "Tamano -", "Tamano +", "Paso " .. pasoEditor }, {
 		function() escalarSel(0.9) end,
 		function() escalarSel(1.1) end,
 		function()
 			pasoEditor = pasoEditor + 1
 			if pasoEditor > 20 then pasoEditor = 0.5 end
+			btnsTam[3].Text = "Paso " .. pasoEditor
 		end,
 	}, 160)
 	fila3(cEditor, { "Duplicar", "Copiar", "Pegar" }, {
@@ -421,12 +442,12 @@ local function principal()
 		function() copiarSel() end,
 		function() pegarSel() end,
 	}, 188)
-	fila3(cEditor, { "Borrar", "Anclar", "Colisión" }, {
+	fila3(cEditor, { "Borrar", "Anclar", "Colision" }, {
 		function() borrarSel() end,
 		function() anclarSel() end,
 		function() colisionSel() end,
 	}, 216)
-	fila3(cEditor, { "Transp −", "Transp +", "Ir al obj" }, {
+	fila3(cEditor, { "Transp -", "Transp +", "Ir al obj" }, {
 		function() transSel(0.1) end,
 		function() transSel(-0.1) end,
 		function() irAlObjeto() end,
@@ -451,7 +472,7 @@ local function principal()
 
 	local lblVelVehVal
 	do
-		local m = B(cVeh, "−", 0, 50, 44, 30)
+		local m = B(cVeh, "-", 0, 50, 44, 30)
 		lblVelVehVal = Instance.new("TextLabel")
 		lblVelVehVal.Size = UDim2.new(0, 116, 0, 30); lblVelVehVal.Position = UDim2.new(0, 50, 0, 50)
 		lblVelVehVal.BackgroundColor3 = Color3.fromRGB(26, 26, 34)
@@ -523,19 +544,6 @@ local function principal()
 	btnAbajo  = crearFlecha("▼", 46)
 
 	-- ============ LOGICA BASE ============
-	local function getChar()
-		local char = LocalPlayer.Character
-		if not char then return nil, nil end
-		return char:FindFirstChildOfClass("Humanoid"), char:FindFirstChild("HumanoidRootPart")
-	end
-	local function getHum() local h = getChar() return h end
-	local function getHRP() local _, r = getChar() return r end
-	local function vertical()
-		if upHeld and not downHeld then return 1 end
-		if downHeld and not upHeld then return -1 end
-		return 0
-	end
-
 	task.spawn(function()
 		local ok, res = pcall(function()
 			local ps = LocalPlayer:FindFirstChild("PlayerScripts") or LocalPlayer:WaitForChild("PlayerScripts", 6)
@@ -691,7 +699,7 @@ local function principal()
 				b.BackgroundColor3 = Color3.fromRGB(30, 30, 42); b.TextColor3 = Color3.fromRGB(150, 150, 170)
 			end
 		end
-		pestañaActiva = nombre
+		pestanaActiva = nombre
 	end
 
 	-- ============ CALLBACKS FLY ============
@@ -708,7 +716,11 @@ local function principal()
 		i = (i % #MODOS) + 1
 		CONFIG.MetodoVuelo = MODOS[i]
 		btnModo.Text = NOMBRES[CONFIG.MetodoVuelo]
-		if volando then detenerVuelo(); task.wait(0.15); iniciarVuelo() end
+		if volando then
+			task.spawn(function()
+				detenerVuelo(); task.wait(0.15); iniciarVuelo()
+			end)
+		end
 	end
 	function toggleAuto() CONFIG.AutoAjuste = not CONFIG.AutoAjuste; pintarAuto() end
 	function toggleAnti() CONFIG.AntiDeteccion = not CONFIG.AntiDeteccion; pintarAnti(); aplicarVelocidad() end
@@ -794,8 +806,6 @@ local function principal()
 		end
 		revisar(LocalPlayer)
 		revisar(ReplicatedStorage, 4000)
-		local okSS = pcall(function() return game:GetService("ServerStorage") end)
-		if okSS then revisar(game:GetService("ServerStorage"), 3000) end
 
 		if getgc then
 			local okgc, gc = pcall(getgc, true)
@@ -804,22 +814,24 @@ local function principal()
 				for _, obj in pairs(gc) do
 					if type(obj) == "table" and cont < 4000 then
 						cont = cont + 1
-						for k, val in pairs(obj) do
-							if type(k) == "string" and type(val) == "number" and coincide(k) then
-								local t, c = obj, k
-								local dupe = false
-								for _, e in ipairs(entradas) do
-									if e.obj == t and e.clave == c then dupe = true break end
-								end
-								if not dupe then
-									table.insert(entradas, {
-										nombre = k .. " (tabla)", obj = t, clave = c,
-										leer = function() return c and t[c] end,
-										escribir = function(n) pcall(function() t[c] = n end) end,
-									})
+						pcall(function()
+							for k, val in pairs(obj) do
+								if type(k) == "string" and type(val) == "number" and coincide(k) then
+									local t, c = obj, k
+									local dupe = false
+									for _, e in ipairs(entradas) do
+										if e.obj == t and e.clave == c then dupe = true break end
+									end
+									if not dupe then
+										table.insert(entradas, {
+											nombre = k .. " (tabla)", obj = t, clave = c,
+											leer = function() return t[c] end,
+											escribir = function(n) pcall(function() t[c] = n end) end,
+										})
+									end
 								end
 							end
-						end
+						end)
 					end
 				end
 			end
@@ -1112,8 +1124,8 @@ local function principal()
 			if o ~= header and o:IsA("GuiObject") then o.Visible = not minimizado end
 		end
 		panel.Size = minimizado and UDim2.new(0, 250, 0, 28) or UDim2.new(0, 250, 0, 420)
-		btnMin.Text = minimizado and "+" or "—"
-		if not minimizado then cambiarPestana(pestañaActiva) end
+		btnMin.Text = minimizado and "+" or "-"
+		if not minimizado then cambiarPestana(pestanaActiva) end
 	end)
 
 	registrarPulsacion(btnOcultar, function()
@@ -1252,8 +1264,8 @@ local function principal()
 						end
 						local d = vectorMovimiento()
 						if d.Magnitude > 0.05 then
-							raiz.AssemblyLinearVelocity =
-								Vector3.new(d.X, raiz.AssemblyLinearVelocity.Y, d.Z) * velVehiculo
+							local v = raiz.AssemblyLinearVelocity
+							raiz.AssemblyLinearVelocity = Vector3.new(d.X * velVehiculo, v.Y, d.Z * velVehiculo)
 						end
 						lblEstadoVeh.Text = "Montado en: " .. montura:GetFullName()
 					end
@@ -1313,7 +1325,7 @@ local function principal()
 	-- ============ INIT ============
 	actualizarInfo(); pintarAuto(); pintarAnti(); pintarRetro(); pintarMuerte(); pintarSuave()
 	cambiarPestana("FLY")
-	print("[Venice] v7 cargado completamente")
+	print("[Venice] v7.1 cargado completamente")
 end
 
 local ok, err = xpcall(principal, function(e)
@@ -1324,7 +1336,7 @@ if not ok then reportar(err) end
 task.spawn(function()
 	pcall(function()
 		StarterGui:SetCore("SendNotification", {
-			Title = "Venice Universal v7",
+			Title = "Venice Universal v7.1",
 			Text = "4 pestanas: FLY / $ / EDITOR / VEH",
 			Duration = 4,
 		})
