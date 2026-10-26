@@ -403,4 +403,362 @@ local function conectarHumanoide(hum)
 			if hum and hum.Parent and hum.Health <= 0 then
 				hum.Health = hum.MaxHealth
 				pcall(function() hum:ChangeState(Enum.HumanoidStateType.Running) end)
-				pcall(function() hum:
+				pcall(function() hum:ChangeState(Enum.HumanoidStateType.GettingUp) end)
+			end
+		end)
+	end)
+end
+
+-- ==================== VUELO ====================
+local function limpiarVuelo()
+	if bv then bv:Destroy() bv = nil end
+	if bg then bg:Destroy() bg = nil end
+end
+
+local function detenerVuelo()
+	volando = false
+	limpiarVuelo()
+
+	btnVuelo.Text             = "VUELO: OFF"
+	btnVuelo.BackgroundColor3 = GRIS
+
+	local hum = getHum()
+	if hum then
+		hum.PlatformStand = false
+		pcall(function() hum:SetStateEnabled(Enum.HumanoidStateType.Running, true) end)
+		aplicarVelocidad()
+	end
+end
+
+local function iniciarVuelo()
+	local hum, hrp = getChar()
+	if not hum or not hrp then return end
+
+	volando = true
+	rampa = CONFIG.Suave and 0 or 1
+
+	btnVuelo.Text             = "VUELO: ON"
+	btnVuelo.BackgroundColor3 = VERDE
+
+	if CONFIG.AntiDeteccion then
+		pcall(function() hrp:SetNetworkOwner(LocalPlayer) end)
+	end
+
+	if CONFIG.MetodoVuelo == "BodyVelocity" then
+		velOriginal = hum.WalkSpeed > 0 and hum.WalkSpeed or velOriginal
+		hum.WalkSpeed = 0
+
+		bv = Instance.new("BodyVelocity")
+		bv.Name     = "FlyBV"
+		bv.MaxForce = Vector3.new(1e5, 1e5, 1e5)
+		bv.Velocity = Vector3.new(0, 0, 0)
+		bv.Parent   = hrp
+
+		if CONFIG.UsarGyro then
+			bg = Instance.new("BodyGyro")
+			bg.Name      = "FlyBG"
+			bg.MaxTorque = Vector3.new(1e5, 1e5, 1e5)
+			bg.P          = 3000
+			bg.D          = 500
+			bg.CFrame     = hrp.CFrame
+			bg.Parent     = hrp
+		end
+	elseif CONFIG.MetodoVuelo == "Velocity" then
+		pcall(function() hum:SetStateEnabled(Enum.HumanoidStateType.Running, false) end)
+		velOriginal = hum.WalkSpeed > 0 and hum.WalkSpeed or velOriginal
+		hum.WalkSpeed = 0
+	end
+
+	if CONFIG.UsarPlatformStand then
+		hum.PlatformStand = true
+	end
+end
+
+local function toggleVuelo()
+	if volando then detenerVuelo() else iniciarVuelo() end
+end
+
+local function toggleSpeed()
+	speedOn = not speedOn
+	rampa = CONFIG.Suave and 0 or 1
+	btnSpeed.Text             = speedOn and "SPEED: ON" or "SPEED: OFF"
+	btnSpeed.BackgroundColor3 = speedOn and VERDE or GRIS
+	aplicarVelocidad()
+end
+
+local function calcularDireccion()
+	local d = vectorMovimiento()
+	local dir = Vector3.new(d.X, vertical(), d.Z)
+	if dir.Magnitude > 1 then dir = dir.Unit end
+	return dir
+end
+
+-- ================= BUCLE PRINCIPAL =================
+RunService.Heartbeat:Connect(function(dt)
+	-- rampa de aceleracion (evita que el anti-cheat note el salto)
+	if rampa < 1 then
+		rampa = math.min(1, rampa + dt / math.max(0.05, CONFIG.TiempoRampa))
+	end
+
+	-- proteccion post-revivir
+	if protegerHasta > 0 and tick() < protegerHasta then
+		local hum = getHum()
+		if hum and hum.Health < hum.MaxHealth then hum.Health = hum.MaxHealth end
+	end
+
+	local hum, hrp = getChar()
+
+	if not volando then
+		if CONFIG.AntiDeteccion and speedOn and hum then aplicarVelocidad() end
+		return
+	end
+
+	if not hum or not hrp then return end
+
+	local dir = calcularDireccion()
+	direccionActual = dir
+	local vel = dir * velVuelo * rampa
+
+	if CONFIG.MetodoVuelo == "Velocity" then
+		hrp.AssemblyLinearVelocity = vel
+
+	elseif CONFIG.MetodoVuelo == "BodyVelocity" then
+		if bv then bv.Velocity = vel end
+		if bg then
+			local cam = workspace.CurrentCamera
+			local look = cam and cam.CFrame.LookVector or Vector3.new(0, 0, -1)
+			local plano = Vector3.new(look.X, 0, look.Z)
+			if plano.Magnitude < 0.01 then plano = Vector3.new(0, 0, -1) end
+			bg.CFrame = CFrame.lookAt(hrp.Position, hrp.Position + plano.Unit)
+		end
+
+	else
+		hrp.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+		hrp.CFrame = hrp.CFrame + vel * dt
+	end
+end)
+
+-- ================= ANTI-RETROCESO =================
+local ultimaPos, ultimaVel
+
+RunService.Heartbeat:Connect(function(dt)
+	local hum, hrp = getChar()
+	if not hum or not hrp then
+		ultimaPos, ultimaVel = nil, nil
+		return
+	end
+
+	if not CONFIG.AntiRetroceso or not ultimaPos then
+		ultimaPos = hrp.Position
+		ultimaVel = hrp.AssemblyLinearVelocity
+		return
+	end
+
+	local pos = hrp.Position
+	local esperada
+
+	if volando and CONFIG.MetodoVuelo == "CFrame" then
+		esperada = ultimaPos + direccionActual * velVuelo * rampa * dt
+	else
+		esperada = ultimaPos + ultimaVel * dt
+	end
+
+	local errH = Vector3.new(pos.X - esperada.X, 0, pos.Z - esperada.Z).Magnitude
+
+	if errH > 18 then
+		local destino = Vector3.new(esperada.X, pos.Y, esperada.Z)
+		local look = hrp.CFrame.LookVector
+		if look.Magnitude < 0.01 then look = Vector3.new(0, 0, -1) end
+		hrp.CFrame = CFrame.lookAt(destino, destino + look)
+		ultimaPos = hrp.Position
+		ultimaVel = hrp.AssemblyLinearVelocity
+		return
+	end
+
+	ultimaPos = pos
+	ultimaVel = hrp.AssemblyLinearVelocity
+end)
+
+task.spawn(function()
+	while task.wait(2) do
+		if CONFIG.AntiDeteccion and volando then
+			local hrp = getHRP()
+			if hrp then
+				local ok, dueno = pcall(function() return hrp:GetNetworkOwner() end)
+				if ok and dueno ~= LocalPlayer then
+					pcall(function() hrp:SetNetworkOwner(LocalPlayer) end)
+				end
+			end
+		end
+	end
+end)
+
+-- ==================== EVENTOS UI ====================
+btnVuelo.MouseButton1Click:Connect(toggleVuelo)
+btnSpeed.MouseButton1Click:Connect(toggleSpeed)
+
+btnModo.MouseButton1Click:Connect(function()
+	local i = 1
+	for n, m in ipairs(MODOS) do if m == CONFIG.MetodoVuelo then i = n end end
+	i = (i % #MODOS) + 1
+	CONFIG.MetodoVuelo = MODOS[i]
+	btnModo.Text = NOMBRES[CONFIG.MetodoVuelo]
+	if volando then
+		detenerVuelo()
+		task.wait(0.15)
+		iniciarVuelo()
+	end
+end)
+
+local function pintarAuto()
+	btnAuto.Text = "AUTO-AJUSTE: " .. (CONFIG.AutoAjuste and "ON" or "OFF")
+	btnAuto.BackgroundColor3 = CONFIG.AutoAjuste and VERDE or GRIS
+end
+btnAuto.MouseButton1Click:Connect(function()
+	CONFIG.AutoAjuste = not CONFIG.AutoAjuste
+	pintarAuto()
+end)
+pintarAuto()
+
+local function pintarAnti()
+	btnAnti.Text = "ANTI-DETECT: " .. (CONFIG.AntiDeteccion and "ON" or "OFF")
+	btnAnti.BackgroundColor3 = CONFIG.AntiDeteccion and VERDE or GRIS
+end
+btnAnti.MouseButton1Click:Connect(function()
+	CONFIG.AntiDeteccion = not CONFIG.AntiDeteccion
+	pintarAnti()
+	aplicarVelocidad()
+end)
+pintarAnti()
+
+local function pintarRetro()
+	btnRetro.Text = "ANTI-RETRO: " .. (CONFIG.AntiRetroceso and "ON" or "OFF")
+	btnRetro.BackgroundColor3 = CONFIG.AntiRetroceso and VERDE or GRIS
+end
+btnRetro.MouseButton1Click:Connect(function()
+	CONFIG.AntiRetroceso = not CONFIG.AntiRetroceso
+	pintarRetro()
+end)
+pintarRetro()
+
+local function pintarMuerte()
+	btnMuerte.Text = "ANTI-MUERTE: " .. CONFIG.AntiMuerte
+	btnMuerte.BackgroundColor3 = CONFIG.AntiMuerte == "OFF" and GRIS
+		or (CONFIG.AntiMuerte == "SIEMPRE" and VERDE or Color3.fromRGB(120, 95, 45))
+end
+btnMuerte.MouseButton1Click:Connect(function()
+	local i = 1
+	for n, m in ipairs(MODOS_MUERTE) do if m == CONFIG.AntiMuerte then i = n end end
+	CONFIG.AntiMuerte = MODOS_MUERTE[(i % #MODOS_MUERTE) + 1]
+	pintarMuerte()
+end)
+pintarMuerte()
+
+local function pintarSuave()
+	btnSuave.Text = "SUAVE: " .. (CONFIG.Suave and "ON" or "OFF")
+	btnSuave.BackgroundColor3 = CONFIG.Suave and VERDE or GRIS
+end
+btnSuave.MouseButton1Click:Connect(function()
+	CONFIG.Suave = not CONFIG.Suave
+	rampa = 1
+	pintarSuave()
+end)
+pintarSuave()
+
+local minimizado = false
+btnMin.MouseButton1Click:Connect(function()
+	minimizado = not minimizado
+	for _, o in ipairs(panel:GetChildren()) do
+		if o ~= header and o:IsA("GuiObject") then
+			o.Visible = not minimizado
+		end
+	end
+	panel.Size  = minimizado and UDim2.new(0, 200, 0, 28) or UDim2.new(0, 200, 0, 306)
+	btnMin.Text = minimizado and "+" or "—"
+end)
+
+btnOcultar.MouseButton1Click:Connect(function()
+	local mostrar = not panel.Visible
+	panel.Visible     = mostrar
+	btnArriba.Visible = mostrar
+	btnAbajo.Visible  = mostrar
+	btnOcultar.Text   = mostrar and "V" or "▲"
+end)
+
+local function engancharFlecha(btn, esArriba)
+	btn.InputBegan:Connect(function(input)
+		if input.UserInputType ~= Enum.UserInputType.Touch then return end
+		if esArriba then touchUp = input upHeld = true else touchDown = input downHeld = true end
+		btn.BackgroundColor3 = VERDE
+	end)
+	btn.InputEnded:Connect(function(input)
+		if input.UserInputType ~= Enum.UserInputType.Touch then return end
+		if esArriba then upHeld = false else downHeld = false end
+		btn.BackgroundColor3 = Color3.fromRGB(28, 28, 38)
+	end)
+end
+engancharFlecha(btnArriba, true)
+engancharFlecha(btnAbajo, false)
+
+UserInputService.InputEnded:Connect(function(input)
+	if input == touchUp then
+		upHeld = false touchUp = nil
+		btnArriba.BackgroundColor3 = Color3.fromRGB(28, 28, 38)
+	end
+	if input == touchDown then
+		downHeld = false touchDown = nil
+		btnAbajo.BackgroundColor3 = Color3.fromRGB(28, 28, 38)
+	end
+end)
+
+-- ==================== TECLADO ====================
+UserInputService.InputBegan:Connect(function(input, procesado)
+	if procesado then return end
+	local k = input.KeyCode
+	if k == Enum.KeyCode.F then toggleVuelo()
+	elseif k == Enum.KeyCode.G then toggleSpeed()
+	elseif k == Enum.KeyCode.Space then upHeld = true
+	elseif k == Enum.KeyCode.LeftShift or k == Enum.KeyCode.RightShift then downHeld = true
+	elseif k == Enum.KeyCode.Equals or k == Enum.KeyCode.KeypadPlus then
+		velVuelo = math.clamp(velVuelo + CONFIG.PasoVelocidad, 5, 2000) actualizarInfo()
+	elseif k == Enum.KeyCode.Minus or k == Enum.KeyCode.KeypadMinus then
+		velVuelo = math.clamp(velVuelo - CONFIG.PasoVelocidad, 5, 2000) actualizarInfo()
+	elseif k == Enum.KeyCode.LeftBracket then
+		velCaminar = math.clamp(velCaminar - CONFIG.PasoVelocidad, 5, 2000) actualizarInfo()
+	elseif k == Enum.KeyCode.RightBracket then
+		velCaminar = math.clamp(velCaminar + CONFIG.PasoVelocidad, 5, 2000) actualizarInfo()
+	end
+end)
+
+UserInputService.InputEnded:Connect(function(input)
+	if input.KeyCode == Enum.KeyCode.Space then upHeld = false end
+	if input.KeyCode == Enum.KeyCode.LeftShift or input.KeyCode == Enum.KeyCode.RightShift then downHeld = false end
+end)
+
+-- ==================== RESPAWN ====================
+local function prepararChar(char)
+	local hum = char:WaitForChild("Humanoid", 10)
+	if not hum then return end
+	velOriginal = 16
+	upHeld, downHeld = false, false
+	rampa = 1
+	conectarHumanoide(hum)
+
+	if volando then
+		volando = false
+		limpiarVuelo()
+		task.wait(0.4)
+		iniciarVuelo()
+	end
+end
+
+if LocalPlayer.Character then prepararChar(LocalPlayer.Character) end
+LocalPlayer.CharacterAdded:Connect(prepararChar)
+
+pcall(function()
+	StarterGui:SetCore("SendNotification", {
+		Title = "Venice Fly v3",
+		Text = "Anti-muerte y suavizado activos. Sube la velocidad a tope.",
+		Duration = 4,
+	})
+end)
