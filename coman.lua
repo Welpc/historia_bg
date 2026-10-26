@@ -1,125 +1,85 @@
 --=============================================================
---  FLY + SPEED SIN MORIR v3  —  MOVIL / DELTA EXECUTOR
+--  FLY + SPEED SIN MORIR v4  —  MOVIL / DELTA EXECUTOR
 --  Hecho por Venice
 ---------------------------------------------------------------
---  Estrategia anti-muerte:
---    1. SUAVIZADO  -> la velocidad sube progresivamente
---    2. ANTI-MUERTE-> si el juego te mata, revives al instante
---    3. AUTO-AJUSTE-> si te matan 3 veces, baja un poco y guarda
---
---  PANEL (arrastra desde la barra de arriba)
---    VUELO | SPEED | MODO | AUTO-AJUSTE | ANTI-DETECT
---    ANTI-RETRO | ANTI-MUERTE | SUAVE
---    [-] [+] velocidad vuelo / correr (manten pulsado)
---
---  MOVIL: joystick para moverte, ▲ / ▼ para la altura
+--  v4: panel creado PRIMERO, sin bloqueos, con reporte de errores
 --=============================================================
 
 local Players          = game:GetService("Players")
 local RunService       = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
 local StarterGui       = game:GetService("StarterGui")
-local LocalPlayer      = Players.LocalPlayer
 
--- ================== CONFIGURACION ==================
+print("[VeniceFly] v4 iniciando...")
+
+-- LocalPlayer a prueba de balas
+local LocalPlayer = Players.LocalPlayer
+if not LocalPlayer then
+	repeat task.wait() until Players.LocalPlayer
+	LocalPlayer = Players.LocalPlayer
+end
+
+local PlayerGui = LocalPlayer:WaitForChild("PlayerGui", 15)
+if not PlayerGui then
+	warn("[VeniceFly] PlayerGui no encontrado")
+	return
+end
+
+local function diferir(f)
+	if task and task.defer then task.defer(f) else delay(0, f) end
+end
+
+-- ================= CONFIG =================
 local CONFIG = {
-	-- "BodyVelocity" = ESTABLE | "Velocity" = PURO (0 objetos) | "CFrame"
 	MetodoVuelo       = "BodyVelocity",
-
-	VelocidadVuelo    = 120,   -- sube todo lo que quieras
+	VelocidadVuelo    = 120,
 	VelocidadCaminar  = 60,
 	PasoVelocidad     = 5,
-
-	Suave             = true,  -- rampa progresiva (CLAVE para no morir)
-	TiempoRampa       = 0.7,   -- segundos en llegar a la velocidad final
-
-	AntiMuerte        = "VELOCIDAD", -- "OFF" | "VELOCIDAD" | "SIEMPRE"
-	AutoAjuste        = true,  -- baja sola si te matan repetido
+	Suave             = true,
+	TiempoRampa       = 0.7,
+	AntiMuerte        = "VELOCIDAD",
+	AutoAjuste        = true,
 	AntiDeteccion     = true,
 	AntiRetroceso     = true,
-
 	UsarPlatformStand = false,
 	UsarGyro          = true,
 }
 
-local MODOS   = { "BodyVelocity", "Velocity", "CFrame" }
-local NOMBRES = {
+local MODOS        = { "BodyVelocity", "Velocity", "CFrame" }
+local NOMBRES      = {
 	BodyVelocity = "MODO: ESTABLE",
 	Velocity     = "MODO: PURO",
 	CFrame       = "MODO: CFrame",
 }
 local MODOS_MUERTE = { "OFF", "VELOCIDAD", "SIEMPRE" }
 
-local volando, speedOn   = false, false
-local velVuelo           = CONFIG.VelocidadVuelo
-local velCaminar         = CONFIG.VelocidadCaminar
-local velOriginal        = 16
-local bv, bg
-local upHeld, downHeld   = false, false
-local touchUp, touchDown
-local aplicando          = false
-local direccionActual    = Vector3.new(0, 0, 0)
-local rampa              = 1
-local protegerHasta      = 0
-local muertesRecientes   = {}
-local totalMuertes       = 0
+local VERDE = Color3.fromRGB(38, 140, 80)
+local GRIS  = Color3.fromRGB(52, 52, 66)
+local AMBAR = Color3.fromRGB(120, 95, 45)
+local FONDO = Color3.fromRGB(18, 18, 24)
 
-local function getChar()
-	local char = LocalPlayer.Character
-	if not char then return nil, nil end
-	return char:FindFirstChildOfClass("Humanoid"), char:FindFirstChild("HumanoidRootPart")
-end
+-- ================= LIMPIAR GUI VIEJA =================
+local vieja = PlayerGui:FindFirstChild("VeniceFlyPanel")
+if vieja then vieja:Destroy() end
 
-local function getHum() local h = getChar() return h end
-local function getHRP() local _, r = getChar() return r end
-
-local function vertical()
-	if upHeld and not downHeld then return 1 end
-	if downHeld and not upHeld then return -1 end
-	return 0
-end
-
-local Controls
-pcall(function()
-	local PlayerModule = require(LocalPlayer.PlayerScripts:WaitForChild("PlayerModule"))
-	Controls = PlayerModule:GetControls()
-end)
-
-local function vectorMovimiento()
-	if Controls then
-		local ok, mv = pcall(function() return Controls:GetMoveVector() end)
-		if ok and mv and mv.Magnitude > 0.05 then
-			local cam = workspace.CurrentCamera
-			if cam then
-				local d = cam.CFrame:VectorToWorldSpace(Vector3.new(mv.X, 0, mv.Z))
-				return Vector3.new(d.X, 0, d.Z)
-			end
-		end
-	end
-	local hum = getHum()
-	if hum then
-		local md = hum.MoveDirection
-		return Vector3.new(md.X, 0, md.Z)
-	end
-	return Vector3.new(0, 0, 0)
-end
-
--- ======================= GUI =======================
+-- ================= GUI (PRIMERO, SIN DEPENDENCIAS) =================
 local gui = Instance.new("ScreenGui")
-gui.Name           = "FlyStealthV3"
+gui.Name           = "VeniceFlyPanel"
 gui.ResetOnSpawn   = false
 gui.IgnoreGuiInset = true
-gui.DisplayOrder   = 999
-gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-gui.Parent         = LocalPlayer:WaitForChild("PlayerGui")
+gui.DisplayOrder   = 1000000
+gui.Enabled        = true
+gui.Parent         = PlayerGui
 
 local panel = Instance.new("Frame")
+panel.Name             = "Panel"
 panel.Size             = UDim2.new(0, 200, 0, 306)
 panel.Position         = UDim2.new(0, 10, 0, 70)
-panel.BackgroundColor3 = Color3.fromRGB(18, 18, 24)
+panel.BackgroundColor3 = FONDO
 panel.BorderSizePixel  = 0
 panel.Active           = true
 panel.Draggable        = true
+panel.Visible          = true
 panel.Parent           = gui
 Instance.new("UICorner", panel).CornerRadius = UDim.new(0, 12)
 local brd = Instance.new("UIStroke", panel)
@@ -137,7 +97,7 @@ local titulo = Instance.new("TextLabel")
 titulo.Size                   = UDim2.new(1, -46, 1, 0)
 titulo.Position               = UDim2.new(0, 12, 0, 0)
 titulo.BackgroundTransparency = 1
-titulo.Text                   = "VENICE  •  FLY v3"
+titulo.Text                   = "VENICE  •  FLY v4"
 titulo.TextColor3             = Color3.fromRGB(235, 235, 245)
 titulo.Font                   = Enum.Font.GothamBold
 titulo.TextSize               = 12
@@ -147,7 +107,7 @@ titulo.Parent                 = header
 local btnMin = Instance.new("TextButton")
 btnMin.Size             = UDim2.new(0, 26, 0, 22)
 btnMin.Position         = UDim2.new(1, -32, 0, 3)
-btnMin.BackgroundColor3 = Color3.fromRGB(52, 52, 66)
+btnMin.BackgroundColor3 = GRIS
 btnMin.TextColor3       = Color3.fromRGB(255, 255, 255)
 btnMin.Font             = Enum.Font.GothamBold
 btnMin.TextSize         = 14
@@ -156,18 +116,16 @@ btnMin.BorderSizePixel  = 0
 btnMin.Parent           = header
 Instance.new("UICorner", btnMin).CornerRadius = UDim.new(0, 6)
 
-local ANCHO_MITAD = 87
-
 local function crearBoton(texto, y, izquierda)
 	local b = Instance.new("TextButton")
 	if izquierda == nil then
 		b.Size     = UDim2.new(1, -20, 0, 28)
 		b.Position = UDim2.new(0, 10, 0, y)
 	else
-		b.Size     = UDim2.new(0, ANCHO_MITAD, 0, 28)
+		b.Size     = UDim2.new(0, 87, 0, 28)
 		b.Position = UDim2.new(0, izquierda and 10 or 103, 0, y)
 	end
-	b.BackgroundColor3 = Color3.fromRGB(52, 52, 66)
+	b.BackgroundColor3 = GRIS
 	b.TextColor3       = Color3.fromRGB(255, 255, 255)
 	b.Font             = Enum.Font.GothamBold
 	b.TextSize         = 11
@@ -177,10 +135,6 @@ local function crearBoton(texto, y, izquierda)
 	Instance.new("UICorner", b).CornerRadius = UDim.new(0, 7)
 	return b
 end
-
-local VERDE = Color3.fromRGB(38, 140, 80)
-local GRIS  = Color3.fromRGB(52, 52, 66)
-local ROJO  = Color3.fromRGB(150, 55, 55)
 
 local lblVueloVal, lblCorrerVal
 
@@ -278,7 +232,6 @@ end
 
 local btnVuelo  = crearBoton("VUELO: OFF", 32)
 local btnSpeed  = crearBoton("SPEED: OFF", 62)
-
 local btnModo   = crearBoton(NOMBRES[CONFIG.MetodoVuelo], 92, true)
 local btnAuto   = crearBoton("AUTO-AJUSTE: ON", 92, false)
 local btnAnti   = crearBoton("ANTI-DETECT: ON", 122, true)
@@ -297,10 +250,8 @@ pista.TextColor3             = Color3.fromRGB(130, 130, 150)
 pista.Font                   = Enum.Font.Gotham
 pista.TextSize               = 10
 pista.TextWrapped            = true
-pista.Text                   = "Joystick + ▲ / ▼. Si te matan, baja velocidad o pon ANTI-MUERTE: SIEMPRE."
+pista.Text                   = "v4 OK  •  Joystick + ▲ / ▼"
 pista.Parent                 = panel
-
-actualizarInfo()
 
 local btnOcultar = Instance.new("TextButton")
 btnOcultar.Size             = UDim2.new(0, 42, 0, 42)
@@ -340,7 +291,106 @@ end
 local btnArriba = crearFlecha("▲", -46)
 local btnAbajo  = crearFlecha("▼", 46)
 
--- ============ VELOCIDAD CON SUAVIZADO ============
+print("[VeniceFly] GUI creada correctamente")
+
+-- ================= REPORTERO DE ERRORES =================
+local lblError
+local function reportar(msg)
+	if not lblError then
+		local g = Instance.new("ScreenGui")
+		g.Name = "VeniceFlyError"
+		g.ResetOnSpawn = false
+		g.DisplayOrder = 1000001
+		g.Parent = PlayerGui
+		lblError = Instance.new("TextLabel")
+		lblError.Size = UDim2.new(0, 340, 0, 110)
+		lblError.Position = UDim2.new(0, 10, 0, 400)
+		lblError.BackgroundColor3 = Color3.fromRGB(140, 35, 35)
+		lblError.TextColor3 = Color3.fromRGB(255, 255, 255)
+		lblError.Font = Enum.Font.Code
+		lblError.TextSize = 11
+		lblError.TextWrapped = true
+		lblError.TextXAlignment = Enum.TextXAlignment.Left
+		lblError.TextYAlignment = Enum.TextYAlignment.Top
+		lblError.Parent = g
+		Instance.new("UICorner", lblError).CornerRadius = UDim.new(0, 8)
+	end
+	lblError.Text = "VeniceFly v4 ERROR:\n" .. tostring(msg)
+	pista.Text = "ERROR - mira el cuadro rojo"
+	warn("[VeniceFly] " .. tostring(msg))
+end
+
+-- ================= ESTADO =================
+local volando, speedOn   = false, false
+local velVuelo           = CONFIG.VelocidadVuelo
+local velCaminar         = CONFIG.VelocidadCaminar
+local velOriginal        = 16
+local bv, bg
+local upHeld, downHeld   = false, false
+local touchUp, touchDown
+local aplicando          = false
+local direccionActual    = Vector3.new(0, 0, 0)
+local rampa              = 1
+local protegerHasta      = 0
+local muertesRecientes   = {}
+local Controls
+
+actualizarInfo()
+
+local function getChar()
+	local char = LocalPlayer.Character
+	if not char then return nil, nil end
+	return char:FindFirstChildOfClass("Humanoid"), char:FindFirstChild("HumanoidRootPart")
+end
+local function getHum() local h = getChar() return h end
+local function getHRP() local _, r = getChar() return r end
+
+local function vertical()
+	if upHeld and not downHeld then return 1 end
+	if downHeld and not upHeld then return -1 end
+	return 0
+end
+
+-- PlayerModule en segundo plano (nunca bloquea)
+task.spawn(function()
+	local ok, res = pcall(function()
+		local ps = LocalPlayer:FindFirstChild("PlayerScripts")
+		if not ps then ps = LocalPlayer:WaitForChild("PlayerScripts", 6) end
+		if not ps then return nil end
+		local pm = ps:FindFirstChild("PlayerModule")
+		if not pm then pm = ps:WaitForChild("PlayerModule", 6) end
+		if not pm then return nil end
+		return require(pm)
+	end)
+	if ok and res then
+		local ok2, c = pcall(function() return res:GetControls() end)
+		if ok2 and c then
+			Controls = c
+			print("[VeniceFly] ControlModule enlazado")
+		end
+	end
+end)
+
+local function vectorMovimiento()
+	if Controls then
+		local ok, mv = pcall(function() return Controls:GetMoveVector() end)
+		if ok and mv and mv.Magnitude > 0.05 then
+			local cam = workspace.CurrentCamera
+			if cam then
+				local d = cam.CFrame:VectorToWorldSpace(Vector3.new(mv.X, 0, mv.Z))
+				return Vector3.new(d.X, 0, d.Z)
+			end
+		end
+	end
+	local hum = getHum()
+	if hum then
+		local md = hum.MoveDirection
+		return Vector3.new(md.X, 0, md.Z)
+	end
+	return Vector3.new(0, 0, 0)
+end
+
+-- ============ VELOCIDAD ============
 local function aplicarVelocidad()
 	if aplicando then return end
 	local hum = getHum()
@@ -362,14 +412,14 @@ local function aplicarVelocidad()
 	end
 end
 
+-- ============ ANTI-MUERTE ============
 local function conectarHumanoide(hum)
 	hum:GetPropertyChangedSignal("WalkSpeed"):Connect(function()
 		if aplicando then return end
 		if not speedOn and not volando then return end
-		if CONFIG.AntiDeteccion then task.defer(aplicarVelocidad) end
+		if CONFIG.AntiDeteccion then diferir(aplicarVelocidad) end
 	end)
 
-	-- ================= ANTI-MUERTE =================
 	hum.Died:Connect(function()
 		if CONFIG.AntiMuerte == "OFF" then return end
 		if CONFIG.AntiMuerte == "VELOCIDAD" and not (volando or speedOn) then return end
@@ -380,26 +430,16 @@ local function conectarHumanoide(hum)
 			if ahora - t < 8 then recientes = recientes + 1 end
 		end
 		table.insert(muertesRecientes, ahora)
-		totalMuertes = totalMuertes + 1
 
-		-- si el juego te mata en bucle, baja un poco para que pare
 		if CONFIG.AutoAjuste and recientes >= 2 then
 			velVuelo   = math.max(40, math.floor(velVuelo * 0.85))
 			velCaminar = math.max(20, math.floor(velCaminar * 0.85))
 			actualizarInfo()
 			muertesRecientes = {}
-			pcall(function()
-				StarterGui:SetCore("SendNotification", {
-					Title = "Auto-ajuste",
-					Text = "Bajado a " .. velVuelo .. " vuelo / " .. velCaminar .. " correr",
-					Duration = 3,
-				})
-			end)
 		end
 
-		-- revive al instante
 		protegerHasta = tick() + 0.9
-		task.defer(function()
+		diferir(function()
 			if hum and hum.Parent and hum.Health <= 0 then
 				hum.Health = hum.MaxHealth
 				pcall(function() hum:ChangeState(Enum.HumanoidStateType.Running) end)
@@ -409,7 +449,7 @@ local function conectarHumanoide(hum)
 	end)
 end
 
--- ==================== VUELO ====================
+-- ============ VUELO ============
 local function limpiarVuelo()
 	if bv then bv:Destroy() bv = nil end
 	if bg then bg:Destroy() bg = nil end
@@ -418,10 +458,8 @@ end
 local function detenerVuelo()
 	volando = false
 	limpiarVuelo()
-
 	btnVuelo.Text             = "VUELO: OFF"
 	btnVuelo.BackgroundColor3 = GRIS
-
 	local hum = getHum()
 	if hum then
 		hum.PlatformStand = false
@@ -436,7 +474,6 @@ local function iniciarVuelo()
 
 	volando = true
 	rampa = CONFIG.Suave and 0 or 1
-
 	btnVuelo.Text             = "VUELO: ON"
 	btnVuelo.BackgroundColor3 = VERDE
 
@@ -447,13 +484,11 @@ local function iniciarVuelo()
 	if CONFIG.MetodoVuelo == "BodyVelocity" then
 		velOriginal = hum.WalkSpeed > 0 and hum.WalkSpeed or velOriginal
 		hum.WalkSpeed = 0
-
 		bv = Instance.new("BodyVelocity")
 		bv.Name     = "FlyBV"
 		bv.MaxForce = Vector3.new(1e5, 1e5, 1e5)
 		bv.Velocity = Vector3.new(0, 0, 0)
 		bv.Parent   = hrp
-
 		if CONFIG.UsarGyro then
 			bg = Instance.new("BodyGyro")
 			bg.Name      = "FlyBG"
@@ -469,9 +504,7 @@ local function iniciarVuelo()
 		hum.WalkSpeed = 0
 	end
 
-	if CONFIG.UsarPlatformStand then
-		hum.PlatformStand = true
-	end
+	if CONFIG.UsarPlatformStand then hum.PlatformStand = true end
 end
 
 local function toggleVuelo()
@@ -493,14 +526,12 @@ local function calcularDireccion()
 	return dir
 end
 
--- ================= BUCLE PRINCIPAL =================
+-- ============ BUCLE PRINCIPAL ============
 RunService.Heartbeat:Connect(function(dt)
-	-- rampa de aceleracion (evita que el anti-cheat note el salto)
 	if rampa < 1 then
 		rampa = math.min(1, rampa + dt / math.max(0.05, CONFIG.TiempoRampa))
 	end
 
-	-- proteccion post-revivir
 	if protegerHasta > 0 and tick() < protegerHasta then
 		local hum = getHum()
 		if hum and hum.Health < hum.MaxHealth then hum.Health = hum.MaxHealth end
@@ -512,7 +543,6 @@ RunService.Heartbeat:Connect(function(dt)
 		if CONFIG.AntiDeteccion and speedOn and hum then aplicarVelocidad() end
 		return
 	end
-
 	if not hum or not hrp then return end
 
 	local dir = calcularDireccion()
@@ -521,7 +551,6 @@ RunService.Heartbeat:Connect(function(dt)
 
 	if CONFIG.MetodoVuelo == "Velocity" then
 		hrp.AssemblyLinearVelocity = vel
-
 	elseif CONFIG.MetodoVuelo == "BodyVelocity" then
 		if bv then bv.Velocity = vel end
 		if bg then
@@ -531,23 +560,20 @@ RunService.Heartbeat:Connect(function(dt)
 			if plano.Magnitude < 0.01 then plano = Vector3.new(0, 0, -1) end
 			bg.CFrame = CFrame.lookAt(hrp.Position, hrp.Position + plano.Unit)
 		end
-
 	else
 		hrp.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
 		hrp.CFrame = hrp.CFrame + vel * dt
 	end
 end)
 
--- ================= ANTI-RETROCESO =================
+-- ============ ANTI-RETROCESO ============
 local ultimaPos, ultimaVel
-
 RunService.Heartbeat:Connect(function(dt)
 	local hum, hrp = getChar()
 	if not hum or not hrp then
 		ultimaPos, ultimaVel = nil, nil
 		return
 	end
-
 	if not CONFIG.AntiRetroceso or not ultimaPos then
 		ultimaPos = hrp.Position
 		ultimaVel = hrp.AssemblyLinearVelocity
@@ -556,7 +582,6 @@ RunService.Heartbeat:Connect(function(dt)
 
 	local pos = hrp.Position
 	local esperada
-
 	if volando and CONFIG.MetodoVuelo == "CFrame" then
 		esperada = ultimaPos + direccionActual * velVuelo * rampa * dt
 	else
@@ -564,7 +589,6 @@ RunService.Heartbeat:Connect(function(dt)
 	end
 
 	local errH = Vector3.new(pos.X - esperada.X, 0, pos.Z - esperada.Z).Magnitude
-
 	if errH > 18 then
 		local destino = Vector3.new(esperada.X, pos.Y, esperada.Z)
 		local look = hrp.CFrame.LookVector
@@ -593,7 +617,7 @@ task.spawn(function()
 	end
 end)
 
--- ==================== EVENTOS UI ====================
+-- ============ EVENTOS UI ============
 btnVuelo.MouseButton1Click:Connect(toggleVuelo)
 btnSpeed.MouseButton1Click:Connect(toggleSpeed)
 
@@ -643,8 +667,13 @@ pintarRetro()
 
 local function pintarMuerte()
 	btnMuerte.Text = "ANTI-MUERTE: " .. CONFIG.AntiMuerte
-	btnMuerte.BackgroundColor3 = CONFIG.AntiMuerte == "OFF" and GRIS
-		or (CONFIG.AntiMuerte == "SIEMPRE" and VERDE or Color3.fromRGB(120, 95, 45))
+	if CONFIG.AntiMuerte == "OFF" then
+		btnMuerte.BackgroundColor3 = GRIS
+	elseif CONFIG.AntiMuerte == "SIEMPRE" then
+		btnMuerte.BackgroundColor3 = VERDE
+	else
+		btnMuerte.BackgroundColor3 = AMBAR
+	end
 end
 btnMuerte.MouseButton1Click:Connect(function()
 	local i = 1
@@ -711,7 +740,7 @@ UserInputService.InputEnded:Connect(function(input)
 	end
 end)
 
--- ==================== TECLADO ====================
+-- ============ TECLADO ============
 UserInputService.InputBegan:Connect(function(input, procesado)
 	if procesado then return end
 	local k = input.KeyCode
@@ -735,7 +764,7 @@ UserInputService.InputEnded:Connect(function(input)
 	if input.KeyCode == Enum.KeyCode.LeftShift or input.KeyCode == Enum.KeyCode.RightShift then downHeld = false end
 end)
 
--- ==================== RESPAWN ====================
+-- ============ RESPAWN ============
 local function prepararChar(char)
 	local hum = char:WaitForChild("Humanoid", 10)
 	if not hum then return end
@@ -743,7 +772,6 @@ local function prepararChar(char)
 	upHeld, downHeld = false, false
 	rampa = 1
 	conectarHumanoide(hum)
-
 	if volando then
 		volando = false
 		limpiarVuelo()
@@ -752,13 +780,26 @@ local function prepararChar(char)
 	end
 end
 
-if LocalPlayer.Character then prepararChar(LocalPlayer.Character) end
-LocalPlayer.CharacterAdded:Connect(prepararChar)
+if LocalPlayer.Character then
+	task.spawn(function()
+		local ok, err = pcall(prepararChar, LocalPlayer.Character)
+		if not ok then reportar(err) end
+	end)
+end
+LocalPlayer.CharacterAdded:Connect(function(c)
+	local ok, err = pcall(prepararChar, c)
+	if not ok then reportar(err) end
+end)
 
-pcall(function()
-	StarterGui:SetCore("SendNotification", {
-		Title = "Venice Fly v3",
-		Text = "Anti-muerte y suavizado activos. Sube la velocidad a tope.",
-		Duration = 4,
-	})
+pista.Text = "v4 OK  •  Joystick + ▲ / ▼"
+print("[VeniceFly] v4 cargado. Panel visible.")
+
+task.spawn(function()
+	pcall(function()
+		StarterGui:SetCore("SendNotification", {
+			Title = "Venice Fly v4",
+			Text = "Panel cargado. Ya no se bloquea.",
+			Duration = 4,
+		})
+	end)
 end)
