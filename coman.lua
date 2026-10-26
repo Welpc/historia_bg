@@ -1,9 +1,9 @@
 --=============================================================
---  FLY + SPEED SIN MORIR v5  —  MOVIL / DELTA EXECUTOR
+--  FLY + SPEED SIN MORIR v6  —  MOVIL / DELTA EXECUTOR
 --  Hecho por Venice
 ---------------------------------------------------------------
---  v5: botones arreglados (sin Draggable, con Activated)
---      + reporte global de errores en pantalla
+--  v6: ARREGLADO el orden de declaracion (velVuelo antes de
+--      actualizarInfo) + toque por coordenadas como respaldo
 --=============================================================
 
 local Players          = game:GetService("Players")
@@ -11,7 +11,7 @@ local RunService       = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
 local StarterGui       = game:GetService("StarterGui")
 
-print("[VeniceFly] v5 iniciando...")
+print("[VeniceFly] v6 iniciando...")
 
 local LocalPlayer = Players.LocalPlayer
 if not LocalPlayer then
@@ -29,40 +29,40 @@ local function diferir(f)
 	if task and task.defer then task.defer(f) else delay(0, f) end
 end
 
--- ================= REPORTERO DE ERRORES =================
+-- ============ REPORTERO (abajo, siempre visible) ============
 local lblError
 local function reportar(msg)
 	if not lblError then
 		local g = Instance.new("ScreenGui")
-		g.Name         = "VeniceFlyError"
-		g.ResetOnSpawn = false
-		g.DisplayOrder = 2000000
+		g.Name           = "VeniceFlyError"
+		g.ResetOnSpawn   = false
+		g.DisplayOrder   = 2000000
 		g.IgnoreGuiInset = true
-		g.Parent       = PlayerGui
+		g.Parent         = PlayerGui
+
 		lblError = Instance.new("TextLabel")
-		lblError.Size = UDim2.new(0, 360, 0, 120)
-		lblError.Position = UDim2.new(0, 10, 0, 400)
+		lblError.AnchorPoint      = Vector2.new(0, 1)
+		lblError.Size             = UDim2.new(0, 380, 0, 130)
+		lblError.Position         = UDim2.new(0, 10, 1, -10)
 		lblError.BackgroundColor3 = Color3.fromRGB(140, 35, 35)
-		lblError.TextColor3 = Color3.fromRGB(255, 255, 255)
-		lblError.Font = Enum.Font.Code
-		lblError.TextSize = 11
-		lblError.TextWrapped = true
-		lblError.TextXAlignment = Enum.TextXAlignment.Left
-		lblError.TextYAlignment = Enum.TextYAlignment.Top
-		lblError.Parent = g
+		lblError.TextColor3       = Color3.fromRGB(255, 255, 255)
+		lblError.Font             = Enum.Font.Code
+		lblError.TextSize         = 11
+		lblError.TextWrapped      = true
+		lblError.TextXAlignment   = Enum.TextXAlignment.Left
+		lblError.TextYAlignment   = Enum.TextYAlignment.Top
+		lblError.ZIndex           = 50
+		lblError.Parent           = g
 		Instance.new("UICorner", lblError).CornerRadius = UDim.new(0, 8)
 	end
-	lblError.Text = "VeniceFly v5 ERROR:\n" .. tostring(msg)
+	lblError.Text = "VeniceFly v6 ERROR:\n" .. tostring(msg)
 	warn("[VeniceFly] " .. tostring(msg))
 end
 
 -- =========================================================
---                     CUERPO PRINCIPAL
--- =========================================================
-local pistaRef
-
 local function principal()
 
+	-- ============ CONFIG ============
 	local CONFIG = {
 		MetodoVuelo       = "BodyVelocity",
 		VelocidadVuelo    = 120,
@@ -91,10 +91,30 @@ local function principal()
 	local AMBAR = Color3.fromRGB(120, 95, 45)
 	local FONDO = Color3.fromRGB(18, 18, 24)
 
+	-- =========================================================
+	--  ESTADO  (TIENE que ir ANTES de actualizarInfo)
+	-- =========================================================
+	local volando, speedOn = false, false
+	local velVuelo         = CONFIG.VelocidadVuelo
+	local velCaminar       = CONFIG.VelocidadCaminar
+	local velOriginal      = 16
+	local bv, bg
+	local upHeld, downHeld = false, false
+	local touchUp, touchDown
+	local aplicando        = false
+	local direccionActual  = Vector3.new(0, 0, 0)
+	local rampa            = 1
+	local protegerHasta    = 0
+	local muertesRecientes = {}
+	local Controls
+	local minimizado       = false
+
 	local vieja = PlayerGui:FindFirstChild("VeniceFlyPanel")
 	if vieja then vieja:Destroy() end
 
-	-- ================= GUI =================
+	-- =========================================================
+	--  GUI
+	-- =========================================================
 	local gui = Instance.new("ScreenGui")
 	gui.Name           = "VeniceFlyPanel"
 	gui.ResetOnSpawn   = false
@@ -110,8 +130,7 @@ local function principal()
 	panel.Position         = UDim2.new(0, 10, 0, 70)
 	panel.BackgroundColor3 = FONDO
 	panel.BorderSizePixel  = 0
-	panel.Active           = false     -- CLAVE: que no se coma los toques
-	panel.Draggable        = false     -- arrastre manual
+	panel.Active           = false
 	panel.Parent           = gui
 	Instance.new("UICorner", panel).CornerRadius = UDim.new(0, 12)
 	local brd = Instance.new("UIStroke", panel)
@@ -121,7 +140,7 @@ local function principal()
 	header.Size             = UDim2.new(1, 0, 0, 28)
 	header.BackgroundColor3 = Color3.fromRGB(30, 30, 42)
 	header.BorderSizePixel  = 0
-	header.Active           = true      -- zona de arrastre
+	header.Active           = false
 	header.Parent           = panel
 	Instance.new("UICorner", header).CornerRadius = UDim.new(0, 12)
 
@@ -129,7 +148,7 @@ local function principal()
 	titulo.Size                   = UDim2.new(1, -46, 1, 0)
 	titulo.Position               = UDim2.new(0, 12, 0, 0)
 	titulo.BackgroundTransparency = 1
-	titulo.Text                   = "VENICE  •  FLY v5"
+	titulo.Text                   = "VENICE  •  FLY v6"
 	titulo.TextColor3             = Color3.fromRGB(235, 235, 245)
 	titulo.Font                   = Enum.Font.GothamBold
 	titulo.TextSize               = 12
@@ -148,43 +167,14 @@ local function principal()
 	btnMin.Parent           = header
 	Instance.new("UICorner", btnMin).CornerRadius = UDim.new(0, 6)
 
-	-- ---------- helper de pulsacion a prueba de fallos ----------
-	local function pulsar(btn, fn)
-		local ultimo = 0
-		local function disparar()
-			local ahora = tick()
-			if ahora - ultimo < 0.15 then return end
-			ultimo = ahora
-			local ok, err = pcall(fn)
-			if not ok then reportar(err) end
-		end
-		btn.Activated:Connect(disparar)
-		btn.MouseButton1Click:Connect(disparar)
-	end
+	-- ---------- labels de velocidad ----------
+	local lblVueloVal, lblCorrerVal
 
-	-- ---------- helper mantener (para flechas y + / -) ----------
-	local function mantener(btn, alBajar, alSubir)
-		local activo = false
-		local function esRaton(i)
-			return i.UserInputType == Enum.UserInputType.Touch
-				or i.UserInputType == Enum.UserInputType.MouseButton1
-		end
-		local function bajar(i)
-			if not esRaton(i) or activo then return end
-			activo = true
-			local ok, err = pcall(alBajar)
-			if not ok then reportar(err) end
-		end
-		local function subir(i)
-			if not esRaton(i) or not activo then return end
-			activo = false
-			local ok, err = pcall(alSubir)
-			if not ok then reportar(err) end
-		end
-		btn.InputBegan:Connect(bajar)
-		btn.MouseButton1Down:Connect(bajar)
-		btn.InputEnded:Connect(subir)
-		btn.MouseButton1Up:Connect(subir)
+	local function actualizarInfo()
+		local a = velVuelo or 0
+		local b = velCaminar or 0
+		if lblVueloVal then  lblVueloVal.Text  = tostring(math.floor(a)) end
+		if lblCorrerVal then lblCorrerVal.Text = tostring(math.floor(b)) end
 	end
 
 	local function crearBoton(texto, y, izquierda)
@@ -205,13 +195,6 @@ local function principal()
 		b.Parent           = panel
 		Instance.new("UICorner", b).CornerRadius = UDim.new(0, 7)
 		return b
-	end
-
-	local lblVueloVal, lblCorrerVal
-
-	local function actualizarInfo()
-		if lblVueloVal then  lblVueloVal.Text  = tostring(math.floor(velVuelo)) end
-		if lblCorrerVal then lblCorrerVal.Text = tostring(math.floor(velCaminar)) end
 	end
 
 	local function filaVelocidad(y, etiqueta, esVuelo)
@@ -264,38 +247,14 @@ local function principal()
 
 		local function cambiar(signo)
 			if esVuelo then
-				velVuelo = math.clamp(velVuelo + signo * CONFIG.PasoVelocidad, 5, 2000)
+				velVuelo = math.clamp((velVuelo or 0) + signo * CONFIG.PasoVelocidad, 5, 2000)
 			else
-				velCaminar = math.clamp(velCaminar + signo * CONFIG.PasoVelocidad, 5, 2000)
+				velCaminar = math.clamp((velCaminar or 0) + signo * CONFIG.PasoVelocidad, 5, 2000)
 			end
 			actualizarInfo()
 		end
 
-		local repitiendo = {}
-		local function engancharRepeticion(btn, signo)
-			local activo = false
-			local id = 0
-			mantener(btn,
-				function()
-					activo = true
-					id = id + 1
-					local mio = id
-					cambiar(signo)
-					task.spawn(function()
-						task.wait(0.35)
-						while activo and id == mio do
-							cambiar(signo)
-							task.wait(0.06)
-						end
-					end)
-				end,
-				function() activo = false end
-			)
-		end
-		engancharRepeticion(minus, -1)
-		engancharRepeticion(plus, 1)
-
-		return valor
+		return valor, minus, plus, cambiar
 	end
 
 	local btnVuelo  = crearBoton("VUELO: OFF", 32)
@@ -307,8 +266,10 @@ local function principal()
 	local btnMuerte = crearBoton("ANTI-MUERTE: VELOCIDAD", 152, true)
 	local btnSuave  = crearBoton("SUAVE: ON", 152, false)
 
-	lblVueloVal  = filaVelocidad(184, "VELOCIDAD DE VUELO", true)
-	lblCorrerVal = filaVelocidad(228, "VELOCIDAD AL CORRER", false)
+	local minusV, plusV, cambiarV
+	local minusC, plusC, cambiarC
+	lblVueloVal, minusV, plusV, cambiarV = filaVelocidad(184, "VELOCIDAD DE VUELO", true)
+	lblCorrerVal, minusC, plusC, cambiarC = filaVelocidad(228, "VELOCIDAD AL CORRER", false)
 
 	local pista = Instance.new("TextLabel")
 	pista.Size                   = UDim2.new(1, -20, 0, 28)
@@ -318,9 +279,8 @@ local function principal()
 	pista.Font                   = Enum.Font.Gotham
 	pista.TextSize               = 10
 	pista.TextWrapped            = true
-	pista.Text                   = "v5 OK  •  Joystick + ▲ / ▼"
+	pista.Text                   = "v6 OK  •  Joystick + ▲ / ▼"
 	pista.Parent                 = panel
-	pistaRef = pista
 
 	local btnOcultar = Instance.new("TextButton")
 	btnOcultar.Size             = UDim2.new(0, 42, 0, 42)
@@ -360,58 +320,125 @@ local function principal()
 	local btnArriba = crearFlecha("▲", -46)
 	local btnAbajo  = crearFlecha("▼", 46)
 
+	actualizarInfo()
 	print("[VeniceFly] GUI creada")
 
-	-- ================= ARRASTRE MANUAL =================
-	do
-		local arrastrando = false
-		local offsetIni   = Vector2.new(0, 0)
-		local posIni      = UDim2.new(0, 0, 0, 0)
+	-- =========================================================
+	--  SISTEMA DE TOQUE (coordenadas + eventos GUI)
+	-- =========================================================
+	local registros = {}
 
-		header.InputBegan:Connect(function(i)
-			if i.UserInputType ~= Enum.UserInputType.Touch
-				and i.UserInputType ~= Enum.UserInputType.MouseButton1 then return end
-			arrastrando = true
-			offsetIni = i.Position
-			posIni = panel.Position
-		end)
-
-		UserInputService.InputChanged:Connect(function(i)
-			if not arrastrando then return end
-			if i.UserInputType ~= Enum.UserInputType.Touch
-				and i.UserInputType ~= Enum.UserInputType.MouseMovement then return end
-			local d = i.Position - offsetIni
-			panel.Position = UDim2.new(
-				posIni.X.Scale, posIni.X.Offset + d.X,
-				posIni.Y.Scale, posIni.Y.Offset + d.Y
-			)
-		end)
-
-		UserInputService.InputEnded:Connect(function(i)
-			if i.UserInputType == Enum.UserInputType.Touch
-				or i.UserInputType == Enum.UserInputType.MouseButton1 then
-				arrastrando = false
-			end
-		end)
+	local function dentro(btn, p)
+		if not btn or not btn.Parent then return false end
+		if not btn.Visible then return false end
+		local tl = btn.AbsolutePosition
+		local sz = btn.AbsoluteSize
+		return p.X >= tl.X and p.X <= tl.X + sz.X
+			and p.Y >= tl.Y and p.Y <= tl.Y + sz.Y
 	end
 
-	-- ================= ESTADO =================
-	local volando, speedOn = false, false
-	local velVuelo         = CONFIG.VelocidadVuelo
-	local velCaminar       = CONFIG.VelocidadCaminar
-	local velOriginal      = 16
-	local bv, bg
-	local upHeld, downHeld = false, false
-	local touchUp, touchDown
-	local aplicando        = false
-	local direccionActual  = Vector3.new(0, 0, 0)
-	local rampa            = 1
-	local protegerHasta    = 0
-	local muertesRecientes = {}
-	local Controls
+	local function registrarPulsacion(btn, fn)
+		local reg = { btn = btn, fn = fn, tipo = "click", presionado = nil, ultimo = 0 }
+		table.insert(registros, reg)
 
-	actualizarInfo()
+		-- respaldo con eventos normales de GUI
+		local function dispararEvento()
+			local ahora = tick()
+			if ahora - reg.ultimo < 0.2 then return end
+			reg.ultimo = ahora
+			local ok, err = pcall(fn)
+			if not ok then reportar(err) end
+		end
+		btn.Activated:Connect(dispararEvento)
+		btn.MouseButton1Click:Connect(dispararEvento)
+	end
 
+	local function registrarMantener(btn, bajar, soltar)
+		table.insert(registros, {
+			btn = btn, tipo = "hold",
+			bajar = bajar, soltar = soltar, presionado = nil,
+		})
+	end
+
+	local arrastrando = false
+	local offsetIni   = Vector2.new(0, 0)
+	local posIni      = UDim2.new(0, 0, 0, 0)
+
+	UserInputService.InputBegan:Connect(function(input)
+		local t = input.UserInputType
+		if t ~= Enum.UserInputType.Touch and t ~= Enum.UserInputType.MouseButton1 then return end
+		local p = input.Position
+
+		if dentro(header, p) then
+			arrastrando = true
+			offsetIni   = p
+			posIni      = panel.Position
+		end
+
+		for _, reg in ipairs(registros) do
+			if dentro(reg.btn, p) then
+				reg.presionado = input
+				reg.btn.BackgroundTransparency = 0.35
+				if reg.tipo == "hold" then
+					local ok, err = pcall(reg.bajar)
+					if not ok then reportar(err) end
+				end
+			end
+		end
+	end)
+
+	UserInputService.InputChanged:Connect(function(input)
+		if not arrastrando then return end
+		local t = input.UserInputType
+		if t ~= Enum.UserInputType.Touch and t ~= Enum.UserInputType.MouseMovement then return end
+		local d = input.Position - offsetIni
+		panel.Position = UDim2.new(
+			posIni.X.Scale, posIni.X.Offset + d.X,
+			posIni.Y.Scale, posIni.Y.Offset + d.Y
+		)
+	end)
+
+	UserInputService.InputEnded:Connect(function(input)
+		local t = input.UserInputType
+		if t ~= Enum.UserInputType.Touch and t ~= Enum.UserInputType.MouseButton1 then return end
+
+		if t == Enum.UserInputType.Touch then
+			if input == touchUp then
+				upHeld = false touchUp = nil
+				btnArriba.BackgroundTransparency = 0.2
+			end
+			if input == touchDown then
+				downHeld = false touchDown = nil
+				btnAbajo.BackgroundTransparency = 0.2
+			end
+		end
+
+		arrastrando = false
+
+		for _, reg in ipairs(registros) do
+			if reg.presionado == input then
+				reg.presionado = nil
+				reg.btn.BackgroundTransparency = 0
+				if reg.tipo == "hold" then
+					local ok, err = pcall(reg.soltar)
+					if not ok then reportar(err) end
+				else
+					if dentro(reg.btn, input.Position) then
+						local agora = tick()
+						if agora - reg.ultimo >= 0.2 then
+							reg.ultimo = agora
+							local ok, err = pcall(reg.fn)
+							if not ok then reportar(err) end
+						end
+					end
+				end
+			end
+		end
+	end)
+
+	-- =========================================================
+	--  LOGICA
+	-- =========================================================
 	local function getChar()
 		local char = LocalPlayer.Character
 		if not char then return nil, nil end
@@ -464,7 +491,6 @@ local function principal()
 		return Vector3.new(0, 0, 0)
 	end
 
-	-- ============ VELOCIDAD ============
 	local function aplicarVelocidad()
 		if aplicando then return end
 		local hum = getHum()
@@ -486,7 +512,6 @@ local function principal()
 		end
 	end
 
-	-- ============ ANTI-MUERTE ============
 	local function conectarHumanoide(hum)
 		hum:GetPropertyChangedSignal("WalkSpeed"):Connect(function()
 			if aplicando then return end
@@ -523,7 +548,6 @@ local function principal()
 		end)
 	end
 
-	-- ============ VUELO ============
 	local function limpiarVuelo()
 		if bv then bv:Destroy() bv = nil end
 		if bg then bg:Destroy() bg = nil end
@@ -600,7 +624,6 @@ local function principal()
 		return dir
 	end
 
-	-- ============ BUCLE ============
 	RunService.Heartbeat:Connect(function(dt)
 		if rampa < 1 then
 			rampa = math.min(1, rampa + dt / math.max(0.05, CONFIG.TiempoRampa))
@@ -640,7 +663,6 @@ local function principal()
 		end
 	end)
 
-	-- ============ ANTI-RETROCESO ============
 	local ultimaPos, ultimaVel
 	RunService.Heartbeat:Connect(function(dt)
 		local hum, hrp = getChar()
@@ -691,11 +713,13 @@ local function principal()
 		end
 	end)
 
-	-- ============ BOTONES ============
-	pulsar(btnVuelo, toggleVuelo)
-	pulsar(btnSpeed, toggleSpeed)
+	-- =========================================================
+	--  BOTONES
+	-- =========================================================
+	registrarPulsacion(btnVuelo, toggleVuelo)
+	registrarPulsacion(btnSpeed, toggleSpeed)
 
-	pulsar(btnModo, function()
+	registrarPulsacion(btnModo, function()
 		local i = 1
 		for n, m in ipairs(MODOS) do if m == CONFIG.MetodoVuelo then i = n end end
 		i = (i % #MODOS) + 1
@@ -712,7 +736,7 @@ local function principal()
 		btnAuto.Text = "AUTO-AJUSTE: " .. (CONFIG.AutoAjuste and "ON" or "OFF")
 		btnAuto.BackgroundColor3 = CONFIG.AutoAjuste and VERDE or GRIS
 	end
-	pulsar(btnAuto, function()
+	registrarPulsacion(btnAuto, function()
 		CONFIG.AutoAjuste = not CONFIG.AutoAjuste
 		pintarAuto()
 	end)
@@ -722,7 +746,7 @@ local function principal()
 		btnAnti.Text = "ANTI-DETECT: " .. (CONFIG.AntiDeteccion and "ON" or "OFF")
 		btnAnti.BackgroundColor3 = CONFIG.AntiDeteccion and VERDE or GRIS
 	end
-	pulsar(btnAnti, function()
+	registrarPulsacion(btnAnti, function()
 		CONFIG.AntiDeteccion = not CONFIG.AntiDeteccion
 		pintarAnti()
 		aplicarVelocidad()
@@ -733,7 +757,7 @@ local function principal()
 		btnRetro.Text = "ANTI-RETRO: " .. (CONFIG.AntiRetroceso and "ON" or "OFF")
 		btnRetro.BackgroundColor3 = CONFIG.AntiRetroceso and VERDE or GRIS
 	end
-	pulsar(btnRetro, function()
+	registrarPulsacion(btnRetro, function()
 		CONFIG.AntiRetroceso = not CONFIG.AntiRetroceso
 		pintarRetro()
 	end)
@@ -749,7 +773,7 @@ local function principal()
 			btnMuerte.BackgroundColor3 = AMBAR
 		end
 	end
-	pulsar(btnMuerte, function()
+	registrarPulsacion(btnMuerte, function()
 		local i = 1
 		for n, m in ipairs(MODOS_MUERTE) do if m == CONFIG.AntiMuerte then i = n end end
 		CONFIG.AntiMuerte = MODOS_MUERTE[(i % #MODOS_MUERTE) + 1]
@@ -761,15 +785,14 @@ local function principal()
 		btnSuave.Text = "SUAVE: " .. (CONFIG.Suave and "ON" or "OFF")
 		btnSuave.BackgroundColor3 = CONFIG.Suave and VERDE or GRIS
 	end
-	pulsar(btnSuave, function()
+	registrarPulsacion(btnSuave, function()
 		CONFIG.Suave = not CONFIG.Suave
 		rampa = 1
 		pintarSuave()
 	end)
 	pintarSuave()
 
-	local minimizado = false
-	pulsar(btnMin, function()
+	registrarPulsacion(btnMin, function()
 		minimizado = not minimizado
 		for _, o in ipairs(panel:GetChildren()) do
 			if o ~= header and o:IsA("GuiObject") then
@@ -780,7 +803,7 @@ local function principal()
 		btnMin.Text = minimizado and "+" or "—"
 	end)
 
-	pulsar(btnOcultar, function()
+	registrarPulsacion(btnOcultar, function()
 		local mostrar = not panel.Visible
 		panel.Visible     = mostrar
 		btnArriba.Visible = mostrar
@@ -788,27 +811,47 @@ local function principal()
 		btnOcultar.Text   = mostrar and "V" or "▲"
 	end)
 
-	mantener(btnArriba,
-		function() upHeld = true  btnArriba.BackgroundColor3 = VERDE end,
+	-- velocidad + / - con repeticion al mantener
+	do
+		local estados = {}
+		local function prepararVel(btn, signo, clave)
+			estados[clave] = { activo = false, id = 0 }
+			registrarMantener(btn,
+				function()
+					local e = estados[clave]
+					e.activo = true
+					e.id = e.id + 1
+					local mio = e.id
+					if clave == "v" then cambiarV(signo) else cambiarC(signo) end
+					task.spawn(function()
+						task.wait(0.35)
+						while e.activo and e.id == mio do
+							if clave == "v" then cambiarV(signo) else cambiarC(signo) end
+							task.wait(0.06)
+						end
+					end)
+				end,
+				function() estados[clave].activo = false end
+			)
+		end
+		prepararVel(minusV, -1, "v")
+		prepararVel(plusV,   1, "v")
+		prepararVel(minusC, -1, "c")
+		prepararVel(plusC,   1, "c")
+	end
+
+	registrarMantener(btnArriba,
+		function() upHeld = true  touchUp = nil btnArriba.BackgroundColor3 = VERDE end,
 		function() upHeld = false btnArriba.BackgroundColor3 = Color3.fromRGB(28, 28, 38) end
 	)
-	mantener(btnAbajo,
-		function() downHeld = true  btnAbajo.BackgroundColor3 = VERDE end,
+	registrarMantener(btnAbajo,
+		function() downHeld = true  touchDown = nil btnAbajo.BackgroundColor3 = VERDE end,
 		function() downHeld = false btnAbajo.BackgroundColor3 = Color3.fromRGB(28, 28, 38) end
 	)
 
-	UserInputService.InputEnded:Connect(function(input)
-		if input == touchUp then
-			upHeld = false touchUp = nil
-			btnArriba.BackgroundColor3 = Color3.fromRGB(28, 28, 38)
-		end
-		if input == touchDown then
-			downHeld = false touchDown = nil
-			btnAbajo.BackgroundColor3 = Color3.fromRGB(28, 28, 38)
-		end
-	end)
-
-	-- ============ TECLADO ============
+	-- =========================================================
+	--  TECLADO
+	-- =========================================================
 	UserInputService.InputBegan:Connect(function(input, procesado)
 		if procesado then return end
 		local k = input.KeyCode
@@ -827,12 +870,9 @@ local function principal()
 		end
 	end)
 
-	UserInputService.InputEnded:Connect(function(input)
-		if input.KeyCode == Enum.KeyCode.Space then upHeld = false end
-		if input.KeyCode == Enum.KeyCode.LeftShift or input.KeyCode == Enum.KeyCode.RightShift then downHeld = false end
-	end)
-
-	-- ============ RESPAWN ============
+	-- =========================================================
+	--  RESPAWN
+	-- =========================================================
 	local function prepararChar(char)
 		local hum = char:WaitForChild("Humanoid", 10)
 		if not hum then return end
@@ -859,7 +899,7 @@ local function principal()
 		if not ok then reportar(err) end
 	end)
 
-	print("[VeniceFly] v5 cargado completamente")
+	print("[VeniceFly] v6 cargado completamente")
 end
 
 -- =========================================================
@@ -874,8 +914,8 @@ end
 task.spawn(function()
 	pcall(function()
 		StarterGui:SetCore("SendNotification", {
-			Title = "Venice Fly v5",
-			Text = "Panel interactivo. Toca VUELO para empezar.",
+			Title = "Venice Fly v6",
+			Text = "Botones arreglados. Toca VUELO.",
 			Duration = 4,
 		})
 	end)
